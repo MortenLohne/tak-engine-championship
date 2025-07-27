@@ -47,7 +47,7 @@ const setGameState = (newGameState) => {
     let newPtn = `[TPS "${newGameState.openingTps}"]`;
     newPtn += `\n[Player1 "${newGameState.whitePlayer}"]`;
     newPtn += `\n[Player2 "${newGameState.blackPlayer}"]`;
-    newPtn += `\n[Komi "${newGameState.halfKomi / 2}"]`;
+    newPtn += `\n[Komi "${Number(newGameState.halfKomi) / 2}"]`;
 
     const whiteNameDiv = document.getElementById("white-name");
     const blackNameDiv = document.getElementById("black-name");
@@ -78,13 +78,22 @@ const setGameState = (newGameState) => {
     currentPvDiv.textContent = lastMoveInfo?.pv.join(" ");
     lastPvDiv.textContent = (newGameState.currentMoveUciInfo?.pv || []).join(" ");
 
+    const currentNpsDiv = currentPly % 2 === 1 ? document.getElementById("white-nps") : document.getElementById("black-nps");
+    const lastNpsDiv = currentPly % 2 === 0 ? document.getElementById("white-nps") : document.getElementById("black-nps");
+
+    const currentNps = 1000 * lastMoveInfo?.nodes / (lastMoveInfo?.time + 1);
+    const lastNps = 1000 * newGameState.currentMoveUciInfo?.nodes / (newGameState.currentMoveUciInfo?.time + 1);
+
+    currentNpsDiv.textContent = `${currentNps > 100000 ? Math.floor(currentNps / 1000) + " knps" : Math.floor(currentNps) + " nps"}`;
+    lastNpsDiv.textContent = `${lastNps > 100000 ? Math.floor(lastNps / 1000) + " knps" : Math.floor(lastNps) + " nps"}`;
+
     const whiteTimeDiv = document.getElementById("white-time");
     const blackTimeDiv = document.getElementById("black-time");
 
     const whiteSecsLeft = newGameState.whiteTimeLeft.secs;
     const blackSecsLeft = newGameState.blackTimeLeft.secs;
-    whiteTimeDiv.textContent = `${Math.floor(whiteSecsLeft / 60)}:${(whiteSecsLeft % 60 + "").padStart(2, "0")}`;
-    blackTimeDiv.textContent = `${Math.floor(blackSecsLeft / 60)}:${(blackSecsLeft % 60 + "").padStart(2, "0")}`;
+    whiteTimeDiv.textContent = `${Math.floor(whiteSecsLeft / 60)}:${(whiteSecsLeft % 60 + "").padStart(2, "0")} `;
+    blackTimeDiv.textContent = `${Math.floor(blackSecsLeft / 60)}:${(blackSecsLeft % 60 + "").padStart(2, "0")} `;
 
     console.log("Setting new PTN:", newPtn);
     ninja.contentWindow.postMessage({ action: "SET_CURRENT_PTN", value: newPtn }, "*");
