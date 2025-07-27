@@ -1,4 +1,5 @@
 let ptnNinjaHasLoaded = false;
+let jumpToLast = true;
 let gameState = null;
 
 window.addEventListener(
@@ -16,6 +17,12 @@ window.addEventListener(
             } else {
                 return; // Ignore other messages until ptn.ninja is fully loaded
             }
+        }
+        if (event.data.action === "LAST") {
+            jumpToLast = true;
+        }
+        if (["PREV", "NEXT", "FIRST"].includes(event.data.action)) {
+            jumpToLast = false;
         }
     },
     false
@@ -81,5 +88,7 @@ const setGameState = (newGameState) => {
 
     console.log("Setting new PTN:", newPtn);
     ninja.contentWindow.postMessage({ action: "SET_CURRENT_PTN", value: newPtn }, "*");
-    ninja.contentWindow.postMessage({ action: "LAST", value: "" }, "*");
+    if (jumpToLast) {
+        ninja.contentWindow.postMessage({ action: "LAST", value: "" }, "*");
+    }
 }
