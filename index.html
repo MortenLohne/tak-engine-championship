@@ -13,35 +13,29 @@
             font-family: sans-serif;
         }
 
-        .row {
-            width: 100%;
+        .chess-container {
             display: flex;
-            justify-content: space-between;
-            align-items: stretch;
+            gap: 20px;
         }
 
-        .input-error {
-            border: 2px solid red;
-            background-color: #ffe6e6;
-            outline: none;
+        .engine-column {
+            flex: 1;
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            background-color: #f9f9f9;
         }
 
-        body>.row {
-            flex-grow: 1;
-            min-width: 200px;
-            flex-wrap: wrap;
-            margin-top: 1em;
+        .engine-column h2 {
+            margin-top: 0;
         }
 
-        body>.row>* {
-            flex-grow: 1;
-            min-width: 200px;
+        .engine-data {
+            margin-bottom: 10px;
         }
 
-        .row input,
-        .row textarea {
-            width: 100% !important;
-            margin-bottom: 1em;
+        .label {
+            font-weight: bold;
         }
     </style>
 </head>
@@ -53,6 +47,30 @@
         src="https://ptn.ninja/&showControls=true&showPlayButton=false&showPTN=false&showText=false&showBoardPrefsBtn=true&disableBoard=true"
         width="100%" height="600px" style="width: 100%; height: 600px; max-height: 100vh" frameborder="0"
         allowfullscreen></iframe>
+
+    <div class="chess-container">
+        <!-- Engine 1 -->
+        <div class="engine-column" id="white-engine">
+            <h2 id="white-name">White</h2>
+            <div class="engine-data"><span class="label">Eval:</span> <span id="white-eval">--%</span>
+            </div>
+            <div class="engine-data"><span class="label">Principal Variation:</span> <span id="white-pv">--</span>
+            </div>
+            <div class="engine-data"><span class="label">Time Left:</span> <span id="white-time">--:--</span></div>
+            <!-- Add more data here if needed -->
+        </div>
+
+        <!-- Engine 2 -->
+        <div class="engine-column" id="black-engine">
+            <h2 id="black-name">Black</h2>
+            <div class="engine-data"><span class="label">Eval:</span> <span id="black-eval">--%</span>
+            </div>
+            <div class="engine-data"><span class="label">Principal Variation:</span> <span id="black-pv">--</span>
+            </div>
+            <div class="engine-data"><span class="label">Time Left:</span> <span id="black-time">--:--</span></div>
+            <!-- Add more data here if needed -->
+        </div>
+    </div>
 
     <script type="module" src="./index.js"></script>
 

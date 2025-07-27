@@ -27,12 +27,12 @@ const fetchLoop = async () => {
         gameState = await result.json();
     } catch (error) {
         console.error("Error fetching game state:", error);
-        window.setTimeout(fetchLoop, 1000);
+        window.setTimeout(fetchLoop, 500);
         return;
     }
 
     setGameState(gameState);
-    window.setTimeout(fetchLoop, 1000);
+    window.setTimeout(fetchLoop, 500);
 }
 
 const setGameState = (newGameState) => {
@@ -41,12 +41,44 @@ const setGameState = (newGameState) => {
     newPtn += `\n[Player1 "${newGameState.whitePlayer}"]`;
     newPtn += `\n[Player2 "${newGameState.blackPlayer}"]`;
     newPtn += `\n[Komi "${newGameState.halfKomi / 2}"]`;
+
+    const whiteNameDiv = document.getElementById("white-name");
+    const blackNameDiv = document.getElementById("black-name");
+
+    whiteNameDiv.textContent = newGameState.whitePlayer;
+    blackNameDiv.textContent = newGameState.blackPlayer;
+
     for (const move of newGameState.openingMoves) {
         newPtn += ` ${move} `;
     }
     for (const move of newGameState.moves) {
         newPtn += ` ${move.move} `;
     }
+
+    const currentPly = newGameState.moves.length + newGameState.openingMoves.length;
+
+    const lastMoveInfo = newGameState.moves[newGameState.moves.length - 1]?.uciInfo;
+
+    const currentMoveEvalDiv = currentPly % 2 === 1 ? document.getElementById("white-eval") : document.getElementById("black-eval");
+    const lastMoveEvalDiv = currentPly % 2 === 0 ? document.getElementById("white-eval") : document.getElementById("black-eval");
+
+    currentMoveEvalDiv.textContent = currentPly % 2 === 1 ? lastMoveInfo?.cpScore : 0 - lastMoveInfo?.cpScore;
+    lastMoveEvalDiv.textContent = currentPly % 2 === 0 ? newGameState.currentMoveUciInfo?.cpScore : 0 - newGameState.currentMoveUciInfo?.cpScore;
+
+    const currentPvDiv = currentPly % 2 === 1 ? document.getElementById("white-pv") : document.getElementById("black-pv");
+    const lastPvDiv = currentPly % 2 === 0 ? document.getElementById("white-pv") : document.getElementById("black-pv");
+
+    currentPvDiv.textContent = lastMoveInfo?.pv.join(" ");
+    lastPvDiv.textContent = (newGameState.currentMoveUciInfo?.pv || []).join(" ");
+
+    const whiteTimeDiv = document.getElementById("white-time");
+    const blackTimeDiv = document.getElementById("black-time");
+
+    const whiteSecsLeft = newGameState.whiteTimeLeft.secs;
+    const blackSecsLeft = newGameState.blackTimeLeft.secs;
+    whiteTimeDiv.textContent = `${Math.floor(whiteSecsLeft / 60)}:${(whiteSecsLeft % 60 + "").padStart(2, "0")}`;
+    blackTimeDiv.textContent = `${Math.floor(blackSecsLeft / 60)}:${(blackSecsLeft % 60 + "").padStart(2, "0")}`;
+
     console.log("Setting new PTN:", newPtn);
     ninja.contentWindow.postMessage({ action: "SET_CURRENT_PTN", value: newPtn }, "*");
     ninja.contentWindow.postMessage({ action: "LAST", value: "" }, "*");
