@@ -1,6 +1,7 @@
 let ptnNinjaHasLoaded = false;
 let jumpToLast = true;
 let gameState = null;
+const ninja = document.getElementById("ninja");
 
 window.addEventListener(
     "message",
@@ -33,17 +34,17 @@ const fetchLoop = async () => {
         const result = await fetch("https://dodo-healthy-eft.ngrok-free.app/0", { headers: { "ngrok-skip-browser-warning": "true" } });
         gameState = await result.json();
     } catch (error) {
-        console.error("Error fetching game state:", error);
-        window.setTimeout(fetchLoop, 500);
+        document.getElementById("no-game-message").style.display = "block";
+        window.setTimeout(fetchLoop, 2000);
         return;
     }
 
+    document.getElementById("no-game-message").style.display = "none";
     setGameState(gameState);
     window.setTimeout(fetchLoop, 500);
 }
 
 const setGameState = (newGameState) => {
-    const ninja = document.getElementById("ninja");
     let newPtn = `[TPS "${newGameState.openingTps}"]`;
     newPtn += `\n[Player1 "${newGameState.whitePlayer}"]`;
     newPtn += `\n[Player2 "${newGameState.blackPlayer}"]`;
