@@ -1,6 +1,10 @@
+import * as jsonpatch from 'https://esm.sh/fast-json-patch@3.1.1';
+import { applyOperation, applyPatch } from 'https://esm.sh/fast-json-patch@3.1.1';
+
 let ptnNinjaHasLoaded = false;
 let jumpToLast = true;
 let gameState = null;
+let ptn = "";
 const ninja = document.getElementById("ninja");
 
 window.addEventListener(
@@ -30,18 +34,24 @@ window.addEventListener(
 );
 
 const fetchLoop = async () => {
-    try {
-        const result = await fetch("https://dodo-healthy-eft.ngrok-free.app/0", { headers: { "ngrok-skip-browser-warning": "true" } });
-        gameState = await result.json();
-    } catch (error) {
-        document.getElementById("no-game-message").style.display = "block";
-        window.setTimeout(fetchLoop, 2000);
-        return;
+    const evtSource = new EventSource("https://dodo-healthy-eft.ngrok-free.app/0/sse");
+
+    evtSource.onmessage = (event) => {
+        document.getElementById("no-game-message").style.display = "none";
+        const patch = JSON.parse(event.data);
+        gameState = applyPatch(gameState, patch).newDocument;
+        if (gameState !== null) {
+            setGameState(gameState);
+        }
     }
 
-    document.getElementById("no-game-message").style.display = "none";
-    setGameState(gameState);
-    window.setTimeout(fetchLoop, 500);
+    evtSource.onerror = (error) => {
+        console.error("Error in SSE connection:", error);
+        document.getElementById("no-game-message").style.display = "block";
+        gameState = null;
+        evtSource.close();
+        window.setTimeout(fetchLoop, 2000);
+    }
 }
 
 const setGameState = (newGameState) => {
@@ -82,8 +92,8 @@ const setGameState = (newGameState) => {
     const currentNpsDiv = currentPly % 2 === 1 ? document.getElementById("white-nps") : document.getElementById("black-nps");
     const lastNpsDiv = currentPly % 2 === 0 ? document.getElementById("white-nps") : document.getElementById("black-nps");
 
-    const currentNps = 1000 * lastMoveInfo?.nodes / (lastMoveInfo?.time + 1);
-    const lastNps = 1000 * newGameState.currentMoveUciInfo?.nodes / (newGameState.currentMoveUciInfo?.time + 1);
+    const currentNps = lastMoveInfo?.nps;
+    const lastNps = newGameState.currentMoveUciInfo?.nps;
 
     currentNpsDiv.textContent = `${currentNps > 100000 ? Math.floor(currentNps / 1000) + " knps" : Math.floor(currentNps) + " nps"}`;
     lastNpsDiv.textContent = `${lastNps > 100000 ? Math.floor(lastNps / 1000) + " knps" : Math.floor(lastNps) + " nps"}`;
@@ -96,9 +106,13 @@ const setGameState = (newGameState) => {
     whiteTimeDiv.textContent = `${Math.floor(whiteSecsLeft / 60)}:${(whiteSecsLeft % 60 + "").padStart(2, "0")} `;
     blackTimeDiv.textContent = `${Math.floor(blackSecsLeft / 60)}:${(blackSecsLeft % 60 + "").padStart(2, "0")} `;
 
-    console.log("Setting new PTN:", newPtn);
-    ninja.contentWindow.postMessage({ action: "SET_CURRENT_PTN", value: newPtn }, "*");
-    if (jumpToLast) {
-        ninja.contentWindow.postMessage({ action: "LAST", value: "" }, "*");
+    // Only update the ptn.ninja window if the PTN actually changed
+    if (ptn !== newPtn) {
+        ptn = newPtn;
+        console.log("Setting new PTN:", newPtn);
+        ninja.contentWindow.postMessage({ action: "SET_CURRENT_PTN", value: newPtn }, "*");
+        if (jumpToLast) {
+            ninja.contentWindow.postMessage({ action: "LAST", value: "" }, "*");
+        }
     }
 }
