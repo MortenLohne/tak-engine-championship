@@ -138,11 +138,11 @@ const setGameState = (newGameState) => {
     }
 
     for (const move of newGameState.moves) {
-        scores.push({ ply, score: move.uciInfo?.cpScore });
+        scores.push({ ply, score: Math.max(Math.min(move.uciInfo?.cpScore, 1000), -1000) });
         ply += 1;
     }
 
-    scores.push({ ply, score: newGameState.currentMoveUciInfo?.cpScore });
+    scores.push({ ply, score: Math.max(Math.min(newGameState.currentMoveUciInfo?.cpScore, 1000), -1000) });
 
     chart.data = {
         labels: scores.map(row => (row.ply + 1) / 2),
