@@ -83,10 +83,10 @@ function updateChart() {
     return;
   }
 
-  let scores = gameState.openingMoves
-    .map(() => ({}))
-    .concat(gameState.moves)
-    .map((move, ply) => ({ ply, score: normalizeEval(move.uciInfo?.cpScore) }));
+  let scores = gameState.moves.map((move, ply) => ({
+    ply: ply + gameState.openingMoves.length,
+    score: normalizeEval(move.uciInfo?.cpScore),
+  }));
 
   scores.push({
     ply: scores.length,
@@ -287,6 +287,9 @@ const updateGameState = () => {
     ptn = `[TPS "${gameState.openingTps}"]`;
     ptn += `\n[Player1 "${formatName(gameState.whitePlayer)}"]`;
     ptn += `\n[Player2 "${formatName(gameState.blackPlayer)}"]`;
+    ptn += `\n[Size "${gameState.size}"]`;
+    ptn += `\n[Site "Racetrack"]`;
+    ptn += `\n[Round "${gameState.roundNumber}"]`;
     ptn += `\n[Komi "${Number(gameState.halfKomi) / 2}"]`;
     ptn +=
       " " +
