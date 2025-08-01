@@ -1,10 +1,22 @@
 import * as jsonpatch from 'https://esm.sh/fast-json-patch@3.1.1';
 import { applyOperation, applyPatch } from 'https://esm.sh/fast-json-patch@3.1.1';
+import Chart from 'https://esm.sh/chart.js@4.5.0/auto';
 
 let ptnNinjaHasLoaded = false;
 let jumpToLast = true;
 let gameState = null;
 let ptn = "";
+let chart = new Chart(
+    document.getElementById('acquisitions'),
+    {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+            ]
+        }
+    }
+);
 const ninja = document.getElementById("ninja");
 
 window.addEventListener(
@@ -114,5 +126,41 @@ const setGameState = (newGameState) => {
         if (jumpToLast) {
             ninja.contentWindow.postMessage({ action: "LAST", value: "" }, "*");
         }
+
+        let scores = [];
+        let ply = 0;
+        for (const move of newGameState.openingMoves) {
+            scores.push({ ply, score: null });
+            ply += 1;
+        }
+
+        for (const move of newGameState.moves) {
+            scores.push({ ply, score: move.uciInfo?.cpScore });
+            ply += 1;
+        }
+
+        chart.data = {
+            labels: scores.map(row => (row.ply + 1) / 2),
+            datasets: [
+                {
+                    label: 'White eval',
+                    data: scores.map(({ ply, score }) => ply % 2 === 0 ? score : null),
+                    spanGaps: true,
+                    backgroundColor: "darkgray",
+                    borderColor: "darkgray",
+                    borderDash: [2, 2],
+                },
+                {
+                    label: 'Black eval',
+                    data: scores.map(({ ply, score }) => ply % 2 === 1 ? 0.0 - score : null),
+                    spanGaps: true,
+                    backgroundColor: "black",
+                    borderColor: "black",
+
+                }
+            ]
+        }
+        chart.update("none");
     }
+
 }

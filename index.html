@@ -13,9 +13,14 @@
             font-family: sans-serif;
         }
 
-        .chess-container {
+        .info-container {
             display: flex;
             gap: 20px;
+        }
+
+        .game-container {
+            display: flex;
+            align-items: flex-start;
         }
 
         .engine-column {
@@ -44,12 +49,17 @@
     <h1 style="text-align: center;">Tak engine championship</h1>
     <p id="no-game-message" style="text-align: center; color:red; display:none">No game running at the moment!</p>
 
-    <iframe id="ninja"
-        src="https://ptn.ninja/&showControls=true&showPlayButton=false&showPTN=false&showText=false&showBoardPrefsBtn=true&disableBoard=true"
-        width="100%" height="600px" style="width: 100%; height: 600px; max-height: 100vh" frameborder="0"
-        allowfullscreen></iframe>
+    <span class="game-container">
+        <iframe id="ninja"
+            src="https://ptn.ninja/&showControls=true&showPlayButton=false&showPTN=false&showText=false&showBoardPrefsBtn=true&disableBoard=true"
+            width="600px" height="600px" style="width: 600px; height: 600px; max-height: 100vh; border: none;"
+            allowfullscreen></iframe>
 
-    <div class="chess-container">
+        <div style="width: 600px; height: 400px;">
+            <canvas id="acquisitions" style="width: 100%; height: 100%;"></canvas>
+        </div>
+    </span>
+    <div class="info-container">
         <!-- Engine 1 -->
         <div class="engine-column" id="white-engine">
             <h2 id="white-name">White</h2>
@@ -76,6 +86,7 @@
             <!-- Add more data here if needed -->
         </div>
     </div>
+
 
     <script type="module" src="./index.js"></script>
 
