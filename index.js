@@ -34,7 +34,7 @@ window.addEventListener(
 );
 
 const fetchLoop = async () => {
-    const evtSource = new EventSource("https://dodo-healthy-eft.ngrok-free.app/0/sse");
+    const evtSource = new EventSource("https://racetrack.mortenlohne.no/0/sse");
 
     evtSource.onmessage = (event) => {
         document.getElementById("no-game-message").style.display = "none";
