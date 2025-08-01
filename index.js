@@ -27,6 +27,14 @@ const chart = new Chart(document.getElementById("chart"), {
   options: {
     animations: false,
     maintainAspectRatio: false,
+    interaction: {
+      mode: "x",
+    },
+    onClick: ({ x }) => {
+      const plyID =
+        chart.scales.x.getValueForPixel(x) + gameState.openingMoves.length - 1;
+      sendToNinja("GO_TO_PLY", { plyID, isDone: true });
+    },
     scales: {
       x: {
         ticks: {
