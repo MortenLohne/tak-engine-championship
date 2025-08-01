@@ -127,40 +127,43 @@ const setGameState = (newGameState) => {
             ninja.contentWindow.postMessage({ action: "LAST", value: "" }, "*");
         }
 
-        let scores = [];
-        let ply = 0;
-        for (const move of newGameState.openingMoves) {
-            scores.push({ ply, score: null });
-            ply += 1;
-        }
-
-        for (const move of newGameState.moves) {
-            scores.push({ ply, score: move.uciInfo?.cpScore });
-            ply += 1;
-        }
-
-        chart.data = {
-            labels: scores.map(row => (row.ply + 1) / 2),
-            datasets: [
-                {
-                    label: 'White eval',
-                    data: scores.map(({ ply, score }) => ply % 2 === 0 ? score : null),
-                    spanGaps: true,
-                    backgroundColor: "darkgray",
-                    borderColor: "darkgray",
-                    borderDash: [2, 2],
-                },
-                {
-                    label: 'Black eval',
-                    data: scores.map(({ ply, score }) => ply % 2 === 1 ? 0.0 - score : null),
-                    spanGaps: true,
-                    backgroundColor: "black",
-                    borderColor: "black",
-
-                }
-            ]
-        }
-        chart.update("none");
     }
 
+    // Update the eval chart
+    let scores = [];
+    let ply = 0;
+    for (const move of newGameState.openingMoves) {
+        scores.push({ ply, score: null });
+        ply += 1;
+    }
+
+    for (const move of newGameState.moves) {
+        scores.push({ ply, score: move.uciInfo?.cpScore });
+        ply += 1;
+    }
+
+    scores.push({ ply, score: newGameState.currentMoveUciInfo?.cpScore });
+
+    chart.data = {
+        labels: scores.map(row => (row.ply + 1) / 2),
+        datasets: [
+            {
+                label: 'White eval',
+                data: scores.map(({ ply, score }) => ply % 2 === 0 ? score : null),
+                spanGaps: true,
+                backgroundColor: "darkgray",
+                borderColor: "darkgray",
+                borderDash: [2, 2],
+            },
+            {
+                label: 'Black eval',
+                data: scores.map(({ ply, score }) => ply % 2 === 1 ? 0.0 - score : null),
+                spanGaps: true,
+                backgroundColor: "black",
+                borderColor: "black",
+
+            }
+        ]
+    }
+    chart.update("none");
 }
