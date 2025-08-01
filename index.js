@@ -135,11 +135,7 @@ const setGameState = (newGameState) => {
 
     // Update the eval chart
     let scores = [];
-    let ply = 0;
-    for (const move of newGameState.openingMoves) {
-        scores.push({ ply, score: null });
-        ply += 1;
-    }
+    let ply = newGameState.openingMoves.length;
 
     for (const move of newGameState.moves) {
         scores.push({ ply, score: Math.max(Math.min(move.uciInfo?.cpScore, 1000), -1000) });
