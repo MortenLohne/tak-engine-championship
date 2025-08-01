@@ -70,6 +70,9 @@ const setGameState = (newGameState) => {
     let newPtn = `[TPS "${newGameState.openingTps}"]`;
     newPtn += `\n[Player1 "${newGameState.whitePlayer}"]`;
     newPtn += `\n[Player2 "${newGameState.blackPlayer}"]`;
+    newPtn += `\n[Size "${newGameState.size}"]`;
+    newPtn += `\n[Site "Racetrack"]`;
+    newPtn += `\n[Round "${newGameState.roundNumber}"]`;
     newPtn += `\n[Komi "${Number(newGameState.halfKomi) / 2}"]`;
 
     const whiteNameDiv = document.getElementById("white-name");
@@ -123,6 +126,7 @@ const setGameState = (newGameState) => {
         ptn = newPtn;
         console.log("Setting new PTN:", newPtn);
         ninja.contentWindow.postMessage({ action: "SET_CURRENT_PTN", value: newPtn }, "*");
+        ninja.contentWindow.postMessage({ action: "SET_NAME", value: `${newGameState.whitePlayer} vs ${newGameState.blackPlayer} ${newGameState.size}x${newGameState.size} round ${newGameState.roundNumber}` }, "*");
         if (jumpToLast) {
             ninja.contentWindow.postMessage({ action: "LAST", value: "" }, "*");
         }
