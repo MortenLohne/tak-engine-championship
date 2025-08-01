@@ -45,8 +45,8 @@ const chart = new Chart(document.getElementById("chart"), {
         },
       },
       y: {
-        min: -100,
-        max: 100,
+        // min: -100,
+        // max: 100,
         ticks: {
           color: () => {
             return theme
