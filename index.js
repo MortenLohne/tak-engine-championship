@@ -1,169 +1,323 @@
-import * as jsonpatch from 'https://esm.sh/fast-json-patch@3.1.1';
-import { applyOperation, applyPatch } from 'https://esm.sh/fast-json-patch@3.1.1';
-import Chart from 'https://esm.sh/chart.js@4.5.0/auto';
+import { applyPatch } from "https://esm.sh/fast-json-patch@3.1.1";
+import Chart from "https://esm.sh/chart.js@4.5.0/auto";
 
-let ptnNinjaHasLoaded = false;
-let jumpToLast = true;
+// const SERVER_URL = "http://localhost:23456";
+const SERVER_URL = "https://racetrack.mortenlohne.no";
+
+let ninjaGameState = null;
 let gameState = null;
+let roundNumber = 0;
+let moveCount = 0;
 let ptn = "";
-let chart = new Chart(
-    document.getElementById('acquisitions'),
-    {
-        type: 'line',
-        data: {
-            labels: [],
-            datasets: [
-            ]
-        }
-    }
-);
-const ninja = document.getElementById("ninja");
+let theme = null;
+
+const ninja = document.getElementById("ninja").contentWindow;
+function sendToNinja(action, value) {
+  ninja.postMessage({ action, value }, "*");
+}
+
+// Initialize chart
+const chartContainer = document.getElementById("chart-wrapper");
+const chart = new Chart(document.getElementById("chart"), {
+  type: "line",
+  data: {
+    labels: [],
+    datasets: [],
+  },
+  options: {
+    animations: false,
+    maintainAspectRatio: false,
+    scales: {
+      x: {
+        ticks: {
+          color: () => {
+            return theme
+              ? theme.secondaryDark
+                ? theme.colors.textLight
+                : theme.colors.textDark
+              : "";
+          },
+        },
+        grid: {
+          color: () => {
+            return theme?.colors.bg;
+          },
+        },
+      },
+      y: {
+        // min: -100,
+        // max: 100,
+        ticks: {
+          color: () => {
+            return theme
+              ? theme.secondaryDark
+                ? theme.colors.textLight
+                : theme.colors.textDark
+              : "";
+          },
+        },
+        grid: {
+          color: () => {
+            return theme?.colors.bg;
+          },
+        },
+      },
+    },
+  },
+});
+window.chart = chart;
+
+function normalizeEval(cpScore) {
+  return cpScore;
+  // return Math.min(100, Math.max(-100, cpScore || 0));
+}
+
+const player1LineColor = () => theme?.colors.player1 || "white";
+const player2LineColor = () => theme?.colors.player2 || "black";
+const player1FillColor = () =>
+  theme?.colors.player1clear.replace(/00$/, "88") || "white";
+const player2FillColor = () =>
+  theme?.colors.player2clear.replace(/00$/, "88") || "black";
+
+function updateChart() {
+  if (!gameState) {
+    return;
+  }
+
+  let scores = gameState.moves.map((move, ply) => ({
+    ply: ply + gameState.openingMoves.length,
+    score: normalizeEval(move.uciInfo?.cpScore),
+  }));
+
+  scores.push({
+    ply: scores.length,
+    score: normalizeEval(gameState.currentMoveUciInfo?.cpScore),
+  });
+
+  chart.data = {
+    labels: scores.map((row) => (row.ply + 1) / 2),
+    datasets: [
+      {
+        label: "Player 1 Eval",
+        data: scores.map(({ ply, score }) => (ply % 2 === 0 ? score : null)),
+        spanGaps: true,
+        borderColor: player1LineColor,
+        backgroundColor: player1FillColor,
+        fill: {
+          target: "origin",
+          above: player1FillColor,
+          below: player2FillColor,
+        },
+      },
+      {
+        label: "Player 2 Eval",
+        data: scores.map(({ ply, score }) => (ply % 2 === 1 ? -score : null)),
+        spanGaps: true,
+        borderColor: player2LineColor,
+        backgroundColor: player2FillColor,
+        fill: {
+          target: "origin",
+          above: player1FillColor,
+          below: player2FillColor,
+        },
+      },
+    ],
+  };
+  chart.update();
+}
+
+function resizeChart() {
+  chart.resize(chartContainer.offsetWidth, chartContainer.offsetHeight);
+}
+resizeChart();
+window.addEventListener("resize", resizeChart);
+
+function updateTheme(newTheme) {
+  theme = newTheme;
+
+  const textColor = theme
+    ? theme.secondaryDark
+      ? theme.colors.textLight
+      : theme.colors.textDark
+    : "";
+
+  document.body.style.background = theme.colors.bg;
+  chartContainer.style.background = theme.colors.panel;
+  Chart.defaults.color = textColor;
+  chart.update();
+}
+
+function formatName(name) {
+  return name.replace(/^(.*\/)/g, "");
+}
+
+function formatAnalysis(uciInfo, currentPlayer, tps = null) {
+  const { cpScore, depth, hashfull, nodes, nps, pv, seldepth, time } = uciInfo;
+
+  let evaluation = cpScore;
+
+  if (currentPlayer === 2) {
+    evaluation = -evaluation;
+  }
+
+  return {
+    tps,
+    evaluation,
+    depth,
+    hashfull,
+    nodes,
+    nps,
+    pv,
+    seldepth,
+    time,
+  };
+}
+
+function setAnalysis(
+  plyID,
+  currentPlayer,
+  tps = null,
+  isAtEndOfMainBranch = false
+) {
+  if (isAtEndOfMainBranch && gameState.currentMoveUciInfo) {
+    sendToNinja(
+      "SET_ANALYSIS",
+      formatAnalysis(gameState.currentMoveUciInfo, currentPlayer)
+    );
+  }
+  if (plyID < gameState.openingMoves.length) {
+    return null;
+  }
+  const move = gameState.moves[plyID - gameState.openingMoves.length + 1];
+  if (move && move.uciInfo) {
+    sendToNinja(
+      "SET_ANALYSIS",
+      formatAnalysis(move.uciInfo, currentPlayer, tps)
+    );
+  }
+}
 
 window.addEventListener(
-    "message",
-    (event) => {
-        if (event.source !== ninja.contentWindow) {
-            return
-        }
+  "message",
+  (event) => {
+    if (event.source !== ninja) {
+      return;
+    }
 
-        if (!ptnNinjaHasLoaded) {
-            if (event.data.action === "GAME_STATE") {
-                ptnNinjaHasLoaded = true;
-                console.log("ptn.ninja loaded");
-                fetchLoop();
-            } else {
-                return; // Ignore other messages until ptn.ninja is fully loaded
-            }
+    const { action, value } = event.data;
+
+    switch (action) {
+      case "GAME_STATE":
+        if (!ninjaGameState) {
+          // Initiate connection to server
+          fetchLoop();
+
+          // Request theme info
+          sendToNinja("GET_THEME");
         }
-        if (event.data.action === "LAST") {
-            jumpToLast = true;
+        ninjaGameState = value;
+        if (gameState) {
+          // Show analysis for current position
+          setAnalysis(
+            ninjaGameState.boardPly ? ninjaGameState.boardPly.id : -1,
+            ninjaGameState.turn,
+            ninjaGameState.tps,
+            ninjaGameState.isAtEndOfMainBranch
+          );
         }
-        if (["PREV", "NEXT", "FIRST"].includes(event.data.action)) {
-            jumpToLast = false;
+        break;
+      case "GET_THEME":
+        updateTheme(value);
+        break;
+      case "SET_UI":
+        if ("themeID" in value) {
+          sendToNinja("GET_THEME");
         }
-    },
-    false
+        break;
+      case "GAME_END":
+        sendToNinja("NOTIFY", {
+          icon: "result",
+          message: `Game ${roundNumber} ended ${value.result.player1}-${value.result.player2}`,
+          position: "top-right",
+          actions: [
+            {
+              color: "primary",
+              label: "View",
+              icon: "open_in_new",
+              action: "VIEW_FINISHED_GAME",
+              value: value.url,
+            },
+            {
+              icon: "close",
+            },
+          ],
+        });
+        break;
+      case "VIEW_FINISHED_GAME":
+        window.open(value, "_blank");
+        break;
+    }
+  },
+  false
 );
 
 const fetchLoop = async () => {
-    const evtSource = new EventSource("https://racetrack.mortenlohne.no/0/sse");
+  const evtSource = new EventSource(SERVER_URL + "/0/sse");
 
-    evtSource.onmessage = (event) => {
-        document.getElementById("no-game-message").style.display = "none";
-        const patch = JSON.parse(event.data);
-        gameState = applyPatch(gameState, patch).newDocument;
-        if (gameState !== null) {
-            setGameState(gameState);
-        }
+  evtSource.onmessage = (event) => {
+    const patch = JSON.parse(event.data);
+    gameState = applyPatch(gameState, patch).newDocument;
+    if (gameState !== null) {
+      updateGameState();
     }
+  };
 
-    evtSource.onerror = (error) => {
-        console.error("Error in SSE connection:", error);
-        document.getElementById("no-game-message").style.display = "block";
-        gameState = null;
-        evtSource.close();
-        window.setTimeout(fetchLoop, 2000);
-    }
-}
+  evtSource.onerror = (error) => {
+    console.error("Error in SSE connection:", error);
+    gameState = null;
+    evtSource.close();
+    window.setTimeout(fetchLoop, 2000);
+  };
+};
 
-const setGameState = (newGameState) => {
-    let newPtn = `[TPS "${newGameState.openingTps}"]`;
-    newPtn += `\n[Player1 "${newGameState.whitePlayer}"]`;
-    newPtn += `\n[Player2 "${newGameState.blackPlayer}"]`;
-    newPtn += `\n[Size "${newGameState.size}"]`;
-    newPtn += `\n[Site "Racetrack"]`;
-    newPtn += `\n[Round "${newGameState.roundNumber}"]`;
-    newPtn += `\n[Komi "${Number(newGameState.halfKomi) / 2}"]`;
+const updateGameState = () => {
+  if (roundNumber !== gameState.roundNumber) {
+    // New game
+    roundNumber = gameState.roundNumber;
+    moveCount = gameState.moves.length;
+    ptn = `[TPS "${gameState.openingTps}"]`;
+    ptn += `\n[Player1 "${formatName(gameState.whitePlayer)}"]`;
+    ptn += `\n[Player2 "${formatName(gameState.blackPlayer)}"]`;
+    ptn += `\n[Size "${gameState.size}"]`;
+    ptn += `\n[Site "Racetrack"]`;
+    ptn += `\n[Round "${gameState.roundNumber}"]`;
+    ptn += `\n[Komi "${Number(gameState.halfKomi) / 2}"]`;
+    ptn +=
+      " " +
+      gameState.openingMoves
+        .concat(gameState.moves.map(({ move }) => move))
+        .join(" ");
 
-    const whiteNameDiv = document.getElementById("white-name");
-    const blackNameDiv = document.getElementById("black-name");
+    sendToNinja("SET_NAME", `Tak Engine Championship: Game ${roundNumber}`);
+    sendToNinja("SET_CURRENT_PTN", ptn);
+    sendToNinja("LAST");
+  } else if (moveCount < gameState.moves.length) {
+    // New move(s)
+    gameState.moves.slice(moveCount).forEach((move) => {
+      sendToNinja("APPEND_PLY", move.move);
+    });
+    moveCount = gameState.moves.length;
+  } else if (
+    ninjaGameState.isAtEndOfMainBranch &&
+    gameState.currentMoveUciInfo
+  ) {
+    // New analysis
+    sendToNinja(
+      "SET_ANALYSIS",
+      formatAnalysis(gameState.currentMoveUciInfo, ninjaGameState.turn)
+    );
+  }
 
-    whiteNameDiv.textContent = newGameState.whitePlayer;
-    blackNameDiv.textContent = newGameState.blackPlayer;
-
-    for (const move of newGameState.openingMoves) {
-        newPtn += ` ${move} `;
-    }
-    for (const move of newGameState.moves) {
-        newPtn += ` ${move.move} `;
-    }
-
-    const currentPly = newGameState.moves.length + newGameState.openingMoves.length;
-
-    const lastMoveInfo = newGameState.moves[newGameState.moves.length - 1]?.uciInfo;
-
-    const currentMoveEvalDiv = currentPly % 2 === 1 ? document.getElementById("white-eval") : document.getElementById("black-eval");
-    const lastMoveEvalDiv = currentPly % 2 === 0 ? document.getElementById("white-eval") : document.getElementById("black-eval");
-
-    currentMoveEvalDiv.textContent = currentPly % 2 === 1 ? lastMoveInfo?.cpScore : 0 - lastMoveInfo?.cpScore;
-    lastMoveEvalDiv.textContent = currentPly % 2 === 0 ? newGameState.currentMoveUciInfo?.cpScore : 0 - newGameState.currentMoveUciInfo?.cpScore;
-
-    const currentPvDiv = currentPly % 2 === 1 ? document.getElementById("white-pv") : document.getElementById("black-pv");
-    const lastPvDiv = currentPly % 2 === 0 ? document.getElementById("white-pv") : document.getElementById("black-pv");
-
-    currentPvDiv.textContent = lastMoveInfo?.pv.join(" ");
-    lastPvDiv.textContent = (newGameState.currentMoveUciInfo?.pv || []).join(" ");
-
-    const currentNpsDiv = currentPly % 2 === 1 ? document.getElementById("white-nps") : document.getElementById("black-nps");
-    const lastNpsDiv = currentPly % 2 === 0 ? document.getElementById("white-nps") : document.getElementById("black-nps");
-
-    const currentNps = lastMoveInfo?.nps;
-    const lastNps = newGameState.currentMoveUciInfo?.nps;
-
-    currentNpsDiv.textContent = `${currentNps > 100000 ? Math.floor(currentNps / 1000) + " knps" : Math.floor(currentNps) + " nps"}`;
-    lastNpsDiv.textContent = `${lastNps > 100000 ? Math.floor(lastNps / 1000) + " knps" : Math.floor(lastNps) + " nps"}`;
-
-    const whiteTimeDiv = document.getElementById("white-time");
-    const blackTimeDiv = document.getElementById("black-time");
-
-    const whiteSecsLeft = newGameState.whiteTimeLeft.secs;
-    const blackSecsLeft = newGameState.blackTimeLeft.secs;
-    whiteTimeDiv.textContent = `${Math.floor(whiteSecsLeft / 60)}:${(whiteSecsLeft % 60 + "").padStart(2, "0")} `;
-    blackTimeDiv.textContent = `${Math.floor(blackSecsLeft / 60)}:${(blackSecsLeft % 60 + "").padStart(2, "0")} `;
-
-    // Only update the ptn.ninja window if the PTN actually changed
-    if (ptn !== newPtn) {
-        ptn = newPtn;
-        console.log("Setting new PTN:", newPtn);
-        ninja.contentWindow.postMessage({ action: "SET_CURRENT_PTN", value: newPtn }, "*");
-        ninja.contentWindow.postMessage({ action: "SET_NAME", value: `${newGameState.whitePlayer} vs ${newGameState.blackPlayer} ${newGameState.size}x${newGameState.size} round ${newGameState.roundNumber}` }, "*");
-        if (jumpToLast) {
-            ninja.contentWindow.postMessage({ action: "LAST", value: "" }, "*");
-        }
-
-    }
-
-    // Update the eval chart
-    let scores = [];
-    let ply = newGameState.openingMoves.length;
-
-    for (const move of newGameState.moves) {
-        scores.push({ ply, score: Math.max(Math.min(move.uciInfo?.cpScore, 1000), -1000) });
-        ply += 1;
-    }
-
-    scores.push({ ply, score: Math.max(Math.min(newGameState.currentMoveUciInfo?.cpScore, 1000), -1000) });
-
-    chart.data = {
-        labels: scores.map(row => (row.ply + 1) / 2),
-        datasets: [
-            {
-                label: 'White eval',
-                data: scores.map(({ ply, score }) => ply % 2 === 0 ? score : null),
-                spanGaps: true,
-                backgroundColor: "darkgray",
-                borderColor: "darkgray",
-                borderDash: [2, 2],
-            },
-            {
-                label: 'Black eval',
-                data: scores.map(({ ply, score }) => ply % 2 === 1 ? 0.0 - score : null),
-                spanGaps: true,
-                backgroundColor: "black",
-                borderColor: "black",
-
-            }
-        ]
-    }
-    chart.update("none");
-}
+  // Update the eval chart
+  updateChart();
+};

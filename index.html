@@ -1,95 +1,73 @@
 <!DOCTYPE html>
 <html lang="en">
-
-<head>
+  <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" http-equiv="Content-Type" />
-    <title>Tak engine championship</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1"
+      http-equiv="Content-Type"
+    />
+    <title>Tak Engine Championship</title>
 
     <style media="screen">
-        body {
-            margin: 0;
-            padding: 30px;
-            font-family: sans-serif;
-        }
+      body {
+        margin: 0;
+        padding: 0;
+      }
 
-        .info-container {
-            display: flex;
-            gap: 20px;
-        }
+      .wrapper {
+        overflow: hidden;
+        position: relative;
+        flex: 0.5 0.5;
+      }
 
-        .game-container {
-            display: flex;
-            align-items: flex-start;
+      #container {
+        display: flex;
+        flex-direction: row;
+      }
+      @media (max-aspect-ratio: 3/2) {
+        #container {
+          flex-direction: column;
         }
+      }
 
-        .engine-column {
-            flex: 1;
-            padding: 15px;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            background-color: #f9f9f9;
-        }
+      #container,
+      #ninja,
+      #chart {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: 0;
+      }
 
-        .engine-column h2 {
-            margin-top: 0;
-        }
+      #chart-wrapper {
+        box-shadow: 0 7px 9px -7px rgba(0, 0, 0, 0.7) inset;
+      }
 
-        .engine-data {
-            margin-bottom: 10px;
-        }
-
-        .label {
-            font-weight: bold;
-        }
+      #ninja-wrapper {
+        flex: 1 0;
+      }
     </style>
-</head>
+  </head>
 
-<body>
-    <h1 style="text-align: center;">Tak engine championship</h1>
-    <p id="no-game-message" style="text-align: center; color:red; display:none">No game running at the moment!</p>
-
-    <span class="game-container">
-        <iframe id="ninja"
-            src="https://ptn.ninja/&showControls=true&showPlayButton=false&showPTN=false&showText=false&showBoardPrefsBtn=true&disableBoard=true"
-            width="600px" height="600px" style="width: 600px; height: 600px; max-height: 100vh; border: none;"
-            allowfullscreen></iframe>
-
-        <div style="width: 600px; height: 400px;">
-            <canvas id="acquisitions" style="width: 100%; height: 100%;"></canvas>
-        </div>
-    </span>
-    <div class="info-container">
-        <!-- Engine 1 -->
-        <div class="engine-column" id="white-engine">
-            <h2 id="white-name">White</h2>
-            <div class="engine-data"><span class="label">Eval:</span> <span id="white-eval">--%</span>
-            </div>
-            <div class="engine-data"><span class="label">Principal Variation:</span> <span id="white-pv">--</span>
-            </div>
-            <div class="engine-data"><span class="label">Speed:</span> <span id="white-nps">--</span>
-            </div>
-            <div class="engine-data"><span class="label">Time Left:</span> <span id="white-time">--:--</span></div>
-            <!-- Add more data here if needed -->
-        </div>
-
-        <!-- Engine 2 -->
-        <div class="engine-column" id="black-engine">
-            <h2 id="black-name">Black</h2>
-            <div class="engine-data"><span class="label">Eval:</span> <span id="black-eval">--%</span>
-            </div>
-            <div class="engine-data"><span class="label">Principal Variation:</span> <span id="black-pv">--</span>
-            </div>
-            <div class="engine-data"><span class="label">Speed:</span> <span id="black-nps">--</span>
-            </div>
-            <div class="engine-data"><span class="label">Time Left:</span> <span id="black-time">--:--</span></div>
-            <!-- Add more data here if needed -->
-        </div>
+  <body>
+    <div id="container">
+      <div id="ninja-wrapper" class="wrapper">
+        <iframe
+          id="ninja"
+          src="https://next.ptn.ninja/&showControls=true&showPlayButton=false&disablePTNTools=true&disableUndo=true&disableText=true&showBoardPrefsBtn=true&disableBoard=true"
+          width="100%"
+          height="100%"
+          frameborder="0"
+          allowfullscreen
+        ></iframe>
+      </div>
+      <div id="chart-wrapper" class="wrapper">
+        <canvas id="chart" width></canvas>
+      </div>
     </div>
 
-
     <script type="module" src="./index.js"></script>
-
-</body>
-
+  </body>
 </html>
