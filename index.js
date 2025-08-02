@@ -83,9 +83,9 @@ function normalizeEval(cpScore) {
 const player1LineColor = () => theme?.colors.player1 || "white";
 const player2LineColor = () => theme?.colors.player2 || "black";
 const player1FillColor = () =>
-  theme?.colors.player1clear.replace(/00$/, "88") || "white";
+  theme?.colors.player1clear.replace(/00$/, "33") || "white";
 const player2FillColor = () =>
-  theme?.colors.player2clear.replace(/00$/, "88") || "black";
+  theme?.colors.player2clear.replace(/00$/, "33") || "black";
 
 function updateChart() {
   if (!gameState) {
