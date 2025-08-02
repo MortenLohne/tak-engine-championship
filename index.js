@@ -4,19 +4,58 @@ import Chart from "https://esm.sh/chart.js@4.5.0/auto";
 // const SERVER_URL = "http://localhost:23456";
 const SERVER_URL = "https://racetrack.mortenlohne.no";
 
-let ninjaGameState = null;
 let gameState = null;
 let roundNumber = 0;
 let moveCount = 0;
-let ptn = "";
+
+let ninjaGameState = null;
 let theme = null;
 
+const ninjaSettingsToSave = [
+  "axisLabels",
+  "axisLabelsSmall",
+  "showMove",
+  "showPTN",
+  "showToolbarAnalysis",
+  "stackCounts",
+  "themeID",
+];
+const ninjaSettingsStorageKey = "ninjaSettings";
+let ninjaSettings = localStorage.getItem(ninjaSettingsStorageKey);
+if (ninjaSettings) {
+  ninjaSettings = JSON.parse(ninjaSettings);
+}
+
 const ninja = document.getElementById("ninja").contentWindow;
+
 function sendToNinja(action, value) {
   ninja.postMessage({ action, value }, "*");
 }
 
-// Initialize chart
+function updateNinjaSettings(settings) {
+  if ("themeID" in settings) {
+    sendToNinja("GET_THEME");
+  }
+  let hasChanged = false;
+  ninjaSettingsToSave.forEach((key) => {
+    if (key in settings) {
+      if (!ninjaSettings) {
+        ninjaSettings = { [key]: settings[key] };
+        hasChanged = true;
+      } else if (ninjaSettings[key] !== settings[key]) {
+        ninjaSettings[key] = settings[key];
+        hasChanged = true;
+      }
+    }
+  });
+  if (hasChanged) {
+    localStorage.setItem(
+      ninjaSettingsStorageKey,
+      JSON.stringify(ninjaSettings)
+    );
+  }
+}
+
 const chartContainer = document.getElementById("chart-wrapper");
 const chart = new Chart(document.getElementById("chart"), {
   type: "line",
@@ -27,6 +66,14 @@ const chart = new Chart(document.getElementById("chart"), {
   options: {
     animations: false,
     maintainAspectRatio: false,
+    interaction: {
+      mode: "x",
+    },
+    onClick: ({ x }) => {
+      const plyID =
+        chart.scales.x.getValueForPixel(x) + gameState.openingMoves.length - 1;
+      sendToNinja("GO_TO_PLY", { plyID, isDone: true });
+    },
     scales: {
       x: {
         ticks: {
@@ -65,7 +112,6 @@ const chart = new Chart(document.getElementById("chart"), {
     },
   },
 });
-window.chart = chart;
 
 function normalizeEval(cpScore) {
   return cpScore;
@@ -75,9 +121,9 @@ function normalizeEval(cpScore) {
 const player1LineColor = () => theme?.colors.player1 || "white";
 const player2LineColor = () => theme?.colors.player2 || "black";
 const player1FillColor = () =>
-  theme?.colors.player1clear.replace(/00$/, "88") || "white";
+  theme?.colors.player1clear.replace(/00$/, "33") || "white";
 const player2FillColor = () =>
-  theme?.colors.player2clear.replace(/00$/, "88") || "black";
+  theme?.colors.player2clear.replace(/00$/, "33") || "black";
 
 // Extract winning probability, as a number between -100 and 100
 function winningProbability(uciInfo) {
@@ -109,7 +155,7 @@ function updateChart() {
     labels: scores.map((row) => (row.ply + 1) / 2),
     datasets: [
       {
-        label: "Player 1 Eval",
+        label: `${formatName(gameState.whitePlayer)}'s evaluation`,
         data: scores.map(({ ply, score }) => (ply % 2 === 0 ? score : null)),
         spanGaps: true,
         borderColor: player1LineColor,
@@ -121,7 +167,7 @@ function updateChart() {
         },
       },
       {
-        label: "Player 2 Eval",
+        label: `${formatName(gameState.blackPlayer)}'s evaluation`,
         data: scores.map(({ ply, score }) => (ply % 2 === 1 ? -score : null)),
         spanGaps: true,
         borderColor: player2LineColor,
@@ -159,7 +205,7 @@ function updateTheme(newTheme) {
 }
 
 function formatName(name) {
-  return name.replace(/^(.*\/)/g, "");
+  return name.replace(/^(.*[\/\\])/g, "");
 }
 
 function formatAnalysis(uciInfo, currentPlayer, tps = null) {
@@ -208,71 +254,7 @@ function setAnalysis(
   }
 }
 
-window.addEventListener(
-  "message",
-  (event) => {
-    if (event.source !== ninja) {
-      return;
-    }
-
-    const { action, value } = event.data;
-
-    switch (action) {
-      case "GAME_STATE":
-        if (!ninjaGameState) {
-          // Initiate connection to server
-          fetchLoop();
-
-          // Request theme info
-          sendToNinja("GET_THEME");
-        }
-        ninjaGameState = value;
-        if (gameState) {
-          // Show analysis for current position
-          setAnalysis(
-            ninjaGameState.boardPly ? ninjaGameState.boardPly.id : -1,
-            ninjaGameState.turn,
-            ninjaGameState.tps,
-            ninjaGameState.isAtEndOfMainBranch
-          );
-        }
-        break;
-      case "GET_THEME":
-        updateTheme(value);
-        break;
-      case "SET_UI":
-        if ("themeID" in value) {
-          sendToNinja("GET_THEME");
-        }
-        break;
-      case "GAME_END":
-        sendToNinja("NOTIFY", {
-          icon: "result",
-          message: `Game ${roundNumber} ended ${value.result.player1}-${value.result.player2}`,
-          position: "top-right",
-          actions: [
-            {
-              color: "primary",
-              label: "View",
-              icon: "open_in_new",
-              action: "VIEW_FINISHED_GAME",
-              value: value.url,
-            },
-            {
-              icon: "close",
-            },
-          ],
-        });
-        break;
-      case "VIEW_FINISHED_GAME":
-        window.open(value, "_blank");
-        break;
-    }
-  },
-  false
-);
-
-const fetchLoop = async () => {
+async function fetchLoop() {
   const evtSource = new EventSource(SERVER_URL + "/0/sse");
 
   evtSource.onmessage = (event) => {
@@ -289,14 +271,14 @@ const fetchLoop = async () => {
     evtSource.close();
     window.setTimeout(fetchLoop, 2000);
   };
-};
+}
 
-const updateGameState = () => {
+function updateGameState() {
   if (roundNumber !== gameState.roundNumber) {
     // New game
     roundNumber = gameState.roundNumber;
     moveCount = gameState.moves.length;
-    ptn = `[TPS "${gameState.openingTps}"]`;
+    let ptn = `[TPS "${gameState.openingTps}"]`;
     ptn += `\n[Player1 "${formatName(gameState.whitePlayer)}"]`;
     ptn += `\n[Player2 "${formatName(gameState.blackPlayer)}"]`;
     ptn += `\n[Size "${gameState.size}"]`;
@@ -331,4 +313,73 @@ const updateGameState = () => {
 
   // Update the eval chart
   updateChart();
-};
+}
+
+//#region PTN Ninja init
+window.addEventListener(
+  "message",
+  (event) => {
+    if (event.source !== ninja) {
+      return;
+    }
+
+    const { action, value } = event.data;
+
+    switch (action) {
+      case "GAME_STATE":
+        if (!ninjaGameState) {
+          // Initiate connection to server
+          fetchLoop();
+
+          if (ninjaSettings) {
+            // Restore previous settings
+            sendToNinja("SET_UI", ninjaSettings);
+          }
+          if (!ninjaSettings || !("themeID" in ninjaSettings)) {
+            // Request theme info
+            sendToNinja("GET_THEME");
+          }
+        }
+        ninjaGameState = value;
+        if (gameState) {
+          // Show analysis for current position
+          setAnalysis(
+            ninjaGameState.boardPly ? ninjaGameState.boardPly.id : -1,
+            ninjaGameState.turn,
+            ninjaGameState.tps,
+            ninjaGameState.isAtEndOfMainBranch
+          );
+        }
+        break;
+      case "GET_THEME":
+        updateTheme(value);
+        break;
+      case "SET_UI":
+        updateNinjaSettings(value);
+        break;
+      case "GAME_END":
+        sendToNinja("NOTIFY", {
+          icon: "result",
+          message: `Game ${roundNumber} ended ${value.result.player1}-${value.result.player2}`,
+          position: "top-right",
+          actions: [
+            {
+              color: "primary",
+              label: "View",
+              icon: "open_in_new",
+              action: "VIEW_FINISHED_GAME",
+              value: value.url,
+            },
+            {
+              icon: "close",
+            },
+          ],
+        });
+        break;
+      case "VIEW_FINISHED_GAME":
+        window.open(value, "_blank");
+        break;
+    }
+  },
+  false
+);
