@@ -147,7 +147,7 @@ function updateChart() {
   });
 
   scores.push({
-    ply: scores.length,
+    ply: scores.length + gameState.openingMoves.length,
     score: winningProbability(gameState.currentMoveUciInfo),
   });
 
