@@ -205,6 +205,68 @@ function setAnalysis(
   }
 }
 
+async function fetchLoop() {
+  const evtSource = new EventSource(SERVER_URL + "/0/sse");
+
+  evtSource.onmessage = (event) => {
+    const patch = JSON.parse(event.data);
+    gameState = applyPatch(gameState, patch).newDocument;
+    if (gameState !== null) {
+      updateGameState();
+    }
+  };
+
+  evtSource.onerror = (error) => {
+    console.error("Error in SSE connection:", error);
+    gameState = null;
+    evtSource.close();
+    window.setTimeout(fetchLoop, 2000);
+  };
+}
+
+function updateGameState() {
+  if (roundNumber !== gameState.roundNumber) {
+    // New game
+    roundNumber = gameState.roundNumber;
+    moveCount = gameState.moves.length;
+    ptn = `[TPS "${gameState.openingTps}"]`;
+    ptn += `\n[Player1 "${formatName(gameState.whitePlayer)}"]`;
+    ptn += `\n[Player2 "${formatName(gameState.blackPlayer)}"]`;
+    ptn += `\n[Size "${gameState.size}"]`;
+    ptn += `\n[Site "Racetrack"]`;
+    ptn += `\n[Round "${gameState.roundNumber}"]`;
+    ptn += `\n[Komi "${Number(gameState.halfKomi) / 2}"]`;
+    ptn +=
+      " " +
+      gameState.openingMoves
+        .concat(gameState.moves.map(({ move }) => move))
+        .join(" ");
+
+    sendToNinja("SET_NAME", `Tak Engine Championship: Game ${roundNumber}`);
+    sendToNinja("SET_CURRENT_PTN", ptn);
+    sendToNinja("LAST");
+  } else if (moveCount < gameState.moves.length) {
+    // New move(s)
+    gameState.moves.slice(moveCount).forEach((move) => {
+      sendToNinja("APPEND_PLY", move.move);
+    });
+    moveCount = gameState.moves.length;
+  } else if (
+    ninjaGameState.isAtEndOfMainBranch &&
+    gameState.currentMoveUciInfo
+  ) {
+    // New analysis
+    sendToNinja(
+      "SET_ANALYSIS",
+      formatAnalysis(gameState.currentMoveUciInfo, ninjaGameState.turn)
+    );
+  }
+
+  // Update the eval chart
+  updateChart();
+}
+
+//#region PTN Ninja init
 window.addEventListener(
   "message",
   (event) => {
@@ -268,64 +330,3 @@ window.addEventListener(
   },
   false
 );
-
-const fetchLoop = async () => {
-  const evtSource = new EventSource(SERVER_URL + "/0/sse");
-
-  evtSource.onmessage = (event) => {
-    const patch = JSON.parse(event.data);
-    gameState = applyPatch(gameState, patch).newDocument;
-    if (gameState !== null) {
-      updateGameState();
-    }
-  };
-
-  evtSource.onerror = (error) => {
-    console.error("Error in SSE connection:", error);
-    gameState = null;
-    evtSource.close();
-    window.setTimeout(fetchLoop, 2000);
-  };
-};
-
-const updateGameState = () => {
-  if (roundNumber !== gameState.roundNumber) {
-    // New game
-    roundNumber = gameState.roundNumber;
-    moveCount = gameState.moves.length;
-    ptn = `[TPS "${gameState.openingTps}"]`;
-    ptn += `\n[Player1 "${formatName(gameState.whitePlayer)}"]`;
-    ptn += `\n[Player2 "${formatName(gameState.blackPlayer)}"]`;
-    ptn += `\n[Size "${gameState.size}"]`;
-    ptn += `\n[Site "Racetrack"]`;
-    ptn += `\n[Round "${gameState.roundNumber}"]`;
-    ptn += `\n[Komi "${Number(gameState.halfKomi) / 2}"]`;
-    ptn +=
-      " " +
-      gameState.openingMoves
-        .concat(gameState.moves.map(({ move }) => move))
-        .join(" ");
-
-    sendToNinja("SET_NAME", `Tak Engine Championship: Game ${roundNumber}`);
-    sendToNinja("SET_CURRENT_PTN", ptn);
-    sendToNinja("LAST");
-  } else if (moveCount < gameState.moves.length) {
-    // New move(s)
-    gameState.moves.slice(moveCount).forEach((move) => {
-      sendToNinja("APPEND_PLY", move.move);
-    });
-    moveCount = gameState.moves.length;
-  } else if (
-    ninjaGameState.isAtEndOfMainBranch &&
-    gameState.currentMoveUciInfo
-  ) {
-    // New analysis
-    sendToNinja(
-      "SET_ANALYSIS",
-      formatAnalysis(gameState.currentMoveUciInfo, ninjaGameState.turn)
-    );
-  }
-
-  // Update the eval chart
-  updateChart();
-};
