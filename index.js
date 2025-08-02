@@ -113,11 +113,6 @@ const chart = new Chart(document.getElementById("chart"), {
   },
 });
 
-function normalizeEval(cpScore) {
-  return cpScore;
-  // return Math.min(100, Math.max(-100, cpScore || 0));
-}
-
 const player1LineColor = () => theme?.colors.player1 || "white";
 const player2LineColor = () => theme?.colors.player2 || "black";
 const player1FillColor = () =>
@@ -128,9 +123,9 @@ const player2FillColor = () =>
 // Extract winning probability, as a number between -100 and 100
 function winningProbability(uciInfo) {
   if (uciInfo?.wdl) {
-      return (uciInfo.wdl[0] / 5 + uciInfo.wdl[1] / 10) - 100;
-   } else {
-      return normalizeEval(uciInfo?.cpScore || 0);
+    return uciInfo.wdl[0] / 5 + uciInfo.wdl[1] / 10 - 100;
+  } else {
+    return uciInfo?.cpScore || 0;
   }
 }
 
