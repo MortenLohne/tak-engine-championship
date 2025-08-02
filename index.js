@@ -194,7 +194,7 @@ function updateTheme(newTheme) {
 }
 
 function formatName(name) {
-  return name.replace(/^(.*\/)/g, "");
+  return name.replace(/^(.*[\/\\])/g, "");
 }
 
 function formatAnalysis(uciInfo, currentPlayer, tps = null) {
