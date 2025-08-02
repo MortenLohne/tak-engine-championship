@@ -92,8 +92,8 @@ const chart = new Chart(document.getElementById("chart"), {
         },
       },
       y: {
-        // min: -100,
-        // max: 100,
+        suggestedMin: -100,
+        suggestedMax: 100,
         ticks: {
           color: () => {
             return theme
