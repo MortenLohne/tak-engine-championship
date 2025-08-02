@@ -4,19 +4,58 @@ import Chart from "https://esm.sh/chart.js@4.5.0/auto";
 // const SERVER_URL = "http://localhost:23456";
 const SERVER_URL = "https://racetrack.mortenlohne.no";
 
-let ninjaGameState = null;
 let gameState = null;
 let roundNumber = 0;
 let moveCount = 0;
-let ptn = "";
+
+let ninjaGameState = null;
 let theme = null;
 
+const ninjaSettingsToSave = [
+  "axisLabels",
+  "axisLabelsSmall",
+  "showMove",
+  "showPTN",
+  "showToolbarAnalysis",
+  "stackCounts",
+  "themeID",
+];
+const ninjaSettingsStorageKey = "ninjaSettings";
+let ninjaSettings = localStorage.getItem(ninjaSettingsStorageKey);
+if (ninjaSettings) {
+  ninjaSettings = JSON.parse(ninjaSettings);
+}
+
 const ninja = document.getElementById("ninja").contentWindow;
+
 function sendToNinja(action, value) {
   ninja.postMessage({ action, value }, "*");
 }
 
-// Initialize chart
+function updateNinjaSettings(settings) {
+  if ("themeID" in settings) {
+    sendToNinja("GET_THEME");
+  }
+  let hasChanged = false;
+  ninjaSettingsToSave.forEach((key) => {
+    if (key in settings) {
+      if (!ninjaSettings) {
+        ninjaSettings = { [key]: settings[key] };
+        hasChanged = true;
+      } else if (ninjaSettings[key] !== settings[key]) {
+        ninjaSettings[key] = settings[key];
+        hasChanged = true;
+      }
+    }
+  });
+  if (hasChanged) {
+    localStorage.setItem(
+      ninjaSettingsStorageKey,
+      JSON.stringify(ninjaSettings)
+    );
+  }
+}
+
 const chartContainer = document.getElementById("chart-wrapper");
 const chart = new Chart(document.getElementById("chart"), {
   type: "line",
@@ -73,7 +112,6 @@ const chart = new Chart(document.getElementById("chart"), {
     },
   },
 });
-window.chart = chart;
 
 function normalizeEval(cpScore) {
   return cpScore;
@@ -229,7 +267,7 @@ function updateGameState() {
     // New game
     roundNumber = gameState.roundNumber;
     moveCount = gameState.moves.length;
-    ptn = `[TPS "${gameState.openingTps}"]`;
+    let ptn = `[TPS "${gameState.openingTps}"]`;
     ptn += `\n[Player1 "${formatName(gameState.whitePlayer)}"]`;
     ptn += `\n[Player2 "${formatName(gameState.blackPlayer)}"]`;
     ptn += `\n[Size "${gameState.size}"]`;
@@ -282,8 +320,14 @@ window.addEventListener(
           // Initiate connection to server
           fetchLoop();
 
-          // Request theme info
-          sendToNinja("GET_THEME");
+          if (ninjaSettings) {
+            // Restore previous settings
+            sendToNinja("SET_UI", ninjaSettings);
+          }
+          if (!ninjaSettings || !("themeID" in ninjaSettings)) {
+            // Request theme info
+            sendToNinja("GET_THEME");
+          }
         }
         ninjaGameState = value;
         if (gameState) {
@@ -300,9 +344,7 @@ window.addEventListener(
         updateTheme(value);
         break;
       case "SET_UI":
-        if ("themeID" in value) {
-          sendToNinja("GET_THEME");
-        }
+        updateNinjaSettings(value);
         break;
       case "GAME_END":
         sendToNinja("NOTIFY", {
