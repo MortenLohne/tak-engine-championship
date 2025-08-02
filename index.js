@@ -79,19 +79,30 @@ const player1FillColor = () =>
 const player2FillColor = () =>
   theme?.colors.player2clear.replace(/00$/, "88") || "black";
 
+// Extract winning probability, as a number between -100 and 100
+function winningProbability(uciInfo) {
+  if (uciInfo?.wdl) {
+      return (uciInfo.wdl[0] / 5 + uciInfo.wdl[1] / 10) - 100;
+   } else {
+      return normalizeEval(uciInfo?.cpScore || 0);
+  }
+}
+
 function updateChart() {
   if (!gameState) {
     return;
   }
 
-  let scores = gameState.moves.map((move, ply) => ({
-    ply: ply + gameState.openingMoves.length,
-    score: normalizeEval(move.uciInfo?.cpScore),
-  }));
+  let scores = gameState.moves.map((move, ply) => {
+    return {
+      ply: ply + gameState.openingMoves.length,
+      score: winningProbability(move.uciInfo),
+    };
+  });
 
   scores.push({
     ply: scores.length,
-    score: normalizeEval(gameState.currentMoveUciInfo?.cpScore),
+    score: winningProbability(gameState.currentMoveUciInfo),
   });
 
   chart.data = {
