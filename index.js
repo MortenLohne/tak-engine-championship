@@ -106,7 +106,7 @@ function updateChart() {
     labels: scores.map((row) => (row.ply + 1) / 2),
     datasets: [
       {
-        label: "Player 1 Eval",
+        label: `${formatName(gameState.whitePlayer)}'s evaluation`,
         data: scores.map(({ ply, score }) => (ply % 2 === 0 ? score : null)),
         spanGaps: true,
         borderColor: player1LineColor,
@@ -118,7 +118,7 @@ function updateChart() {
         },
       },
       {
-        label: "Player 2 Eval",
+        label: `${formatName(gameState.blackPlayer)}'s evaluation`,
         data: scores.map(({ ply, score }) => (ply % 2 === 1 ? -score : null)),
         spanGaps: true,
         borderColor: player2LineColor,
