@@ -7,6 +7,7 @@ const SERVER_URL = "https://racetrack.mortenlohne.no";
 let gameState = null;
 let roundNumber = 0;
 let moveCount = 0;
+let previousGame = null;
 
 let ninjaGameState = null;
 let theme = null;
@@ -73,6 +74,7 @@ const chart = new Chart(document.getElementById("chart"), {
       const plyID =
         chart.scales.x.getValueForPixel(x) + gameState.openingMoves.length - 1;
       sendToNinja("GO_TO_PLY", { plyID, isDone: true });
+      ninja.focus();
     },
     scales: {
       x: {
@@ -92,8 +94,8 @@ const chart = new Chart(document.getElementById("chart"), {
         },
       },
       y: {
-        // min: -100,
-        // max: 100,
+        suggestedMin: -100,
+        suggestedMax: 100,
         ticks: {
           color: () => {
             return theme
@@ -113,11 +115,6 @@ const chart = new Chart(document.getElementById("chart"), {
   },
 });
 
-function normalizeEval(cpScore) {
-  return cpScore;
-  // return Math.min(100, Math.max(-100, cpScore || 0));
-}
-
 const player1LineColor = () => theme?.colors.player1 || "white";
 const player2LineColor = () => theme?.colors.player2 || "black";
 const player1FillColor = () =>
@@ -128,9 +125,9 @@ const player2FillColor = () =>
 // Extract winning probability, as a number between -100 and 100
 function winningProbability(uciInfo) {
   if (uciInfo?.wdl) {
-      return (uciInfo.wdl[0] / 5 + uciInfo.wdl[1] / 10) - 100;
-   } else {
-      return normalizeEval(uciInfo?.cpScore || 0);
+    return uciInfo.wdl[0] / 5 + uciInfo.wdl[1] / 10 - 100;
+  } else {
+    return uciInfo?.cpScore || 0;
   }
 }
 
@@ -165,6 +162,9 @@ function updateChart() {
           above: player1FillColor,
           below: player2FillColor,
         },
+        tension: 0.3,
+        pointBorderWidth: 3,
+        pointHoverBorderWidth: 5,
       },
       {
         label: `${formatName(gameState.blackPlayer)}'s evaluation`,
@@ -177,8 +177,11 @@ function updateChart() {
           above: player1FillColor,
           below: player2FillColor,
         },
+        tension: 0.3,
+        pointBorderWidth: 3,
+        pointHoverBorderWidth: 5,
       },
-    ],
+    ].sort((a) => (a.data[a.data.length - 1] === null ? 1 : -1)),
   };
   chart.update();
 }
@@ -209,9 +212,9 @@ function formatName(name) {
 }
 
 function formatAnalysis(uciInfo, currentPlayer, tps = null) {
-  const { cpScore, depth, hashfull, nodes, nps, pv, seldepth, time } = uciInfo;
+  const { depth, hashfull, nodes, nps, pv, seldepth, time } = uciInfo;
 
-  let evaluation = cpScore;
+  let evaluation = winningProbability(uciInfo);
 
   if (currentPlayer === 2) {
     evaluation = -evaluation;
@@ -230,28 +233,59 @@ function formatAnalysis(uciInfo, currentPlayer, tps = null) {
   };
 }
 
-function setAnalysis(
-  plyID,
-  currentPlayer,
-  tps = null,
-  isAtEndOfMainBranch = false
-) {
-  if (isAtEndOfMainBranch && gameState.currentMoveUciInfo) {
+function setCurrentAnalysis() {
+  if (
+    gameState &&
+    gameState.currentMoveUciInfo &&
+    ninjaGameState.isAtEndOfMainBranch
+  ) {
     sendToNinja(
       "SET_ANALYSIS",
-      formatAnalysis(gameState.currentMoveUciInfo, currentPlayer)
+      formatAnalysis(gameState.currentMoveUciInfo, ninjaGameState.turn)
     );
   }
-  if (plyID < gameState.openingMoves.length) {
-    return null;
+}
+
+function saveAnalysisToNotes() {
+  const notes = {};
+  const moves = gameState.openingMoves.concat(gameState.moves);
+  const openingMoveCount = gameState.openingMoves.length;
+  moves.slice(openingMoveCount + moveCount).forEach((move, i) => {
+    const plyID = i + openingMoveCount + moveCount;
+
+    // Eval note
+    if (moves[plyID - 1]) {
+      if (!(plyID - 1 in notes)) {
+        notes[plyID - 1] = [];
+      }
+      notes[plyID - 1].push(formatEvalNote(move.uciInfo, 1 + (plyID % 2)));
+    }
+
+    // PV note
+    if (!(plyID in notes)) {
+      notes[plyID] = [];
+    }
+    notes[plyID].push(formatPVNote(move.uciInfo));
+  });
+  if (Object.keys(notes).length) {
+    sendToNinja("ADD_NOTES", notes);
   }
-  const move = gameState.moves[plyID - gameState.openingMoves.length + 1];
-  if (move && move.uciInfo) {
-    sendToNinja(
-      "SET_ANALYSIS",
-      formatAnalysis(move.uciInfo, currentPlayer, tps)
-    );
+}
+
+function formatEvalNote(uciInfo, turn) {
+  let { evaluation, depth, nodes, time } = formatAnalysis(uciInfo, turn);
+  evaluation = Math.round(10 * evaluation) / 1000;
+  if (evaluation >= 0) {
+    evaluation = `+${evaluation}`;
   }
+  if (depth) {
+    depth = `/${depth}`;
+  }
+  return `${evaluation}${depth || ""} ${nodes} nodes ${time}ms`;
+}
+
+function formatPVNote(uciInfo) {
+  return `pv ${uciInfo.pv.join(" ")}`;
 }
 
 async function fetchLoop() {
@@ -274,10 +308,13 @@ async function fetchLoop() {
 }
 
 function updateGameState() {
-  if (roundNumber !== gameState.roundNumber) {
+  if (
+    roundNumber !== gameState.roundNumber ||
+    moveCount > gameState.moves.length
+  ) {
     // New game
     roundNumber = gameState.roundNumber;
-    moveCount = gameState.moves.length;
+    moveCount = 0;
     let ptn = `[TPS "${gameState.openingTps}"]`;
     ptn += `\n[Player1 "${formatName(gameState.whitePlayer)}"]`;
     ptn += `\n[Player2 "${formatName(gameState.blackPlayer)}"]`;
@@ -294,21 +331,18 @@ function updateGameState() {
     sendToNinja("SET_NAME", `Tak Engine Championship: Game ${roundNumber}`);
     sendToNinja("SET_CURRENT_PTN", ptn);
     sendToNinja("LAST");
+    saveAnalysisToNotes();
+    moveCount = gameState.moves.length;
   } else if (moveCount < gameState.moves.length) {
     // New move(s)
     gameState.moves.slice(moveCount).forEach((move) => {
       sendToNinja("APPEND_PLY", move.move);
     });
+    saveAnalysisToNotes();
     moveCount = gameState.moves.length;
-  } else if (
-    ninjaGameState.isAtEndOfMainBranch &&
-    gameState.currentMoveUciInfo
-  ) {
+  } else {
     // New analysis
-    sendToNinja(
-      "SET_ANALYSIS",
-      formatAnalysis(gameState.currentMoveUciInfo, ninjaGameState.turn)
-    );
+    setCurrentAnalysis();
   }
 
   // Update the eval chart
@@ -341,15 +375,8 @@ window.addEventListener(
           }
         }
         ninjaGameState = value;
-        if (gameState) {
-          // Show analysis for current position
-          setAnalysis(
-            ninjaGameState.boardPly ? ninjaGameState.boardPly.id : -1,
-            ninjaGameState.turn,
-            ninjaGameState.tps,
-            ninjaGameState.isAtEndOfMainBranch
-          );
-        }
+        // Show analysis for current position if possible
+        setCurrentAnalysis();
         break;
       case "GET_THEME":
         updateTheme(value);
@@ -358,9 +385,16 @@ window.addEventListener(
         updateNinjaSettings(value);
         break;
       case "GAME_END":
+        previousGame = {
+          roundNumber,
+          result: value.result,
+        };
+        sendToNinja("GET_URL");
+        break;
+      case "GET_URL":
         sendToNinja("NOTIFY", {
           icon: "result",
-          message: `Game ${roundNumber} ended ${value.result.player1}-${value.result.player2}`,
+          message: `Game ${previousGame.roundNumber} ended ${previousGame.result.player1}-${previousGame.result.player2}`,
           position: "top-right",
           actions: [
             {
@@ -368,7 +402,7 @@ window.addEventListener(
               label: "View",
               icon: "open_in_new",
               action: "VIEW_FINISHED_GAME",
-              value: value.url,
+              value,
             },
             {
               icon: "close",
