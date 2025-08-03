@@ -7,6 +7,7 @@ const SERVER_URL = "http://localhost:23456";
 let gameState = null;
 let roundNumber = 0;
 let moveCount = 0;
+let previousGame = null;
 
 let ninjaGameState = null;
 let theme = null;
@@ -381,9 +382,16 @@ window.addEventListener(
         updateNinjaSettings(value);
         break;
       case "GAME_END":
+        previousGame = {
+          roundNumber,
+          result: value.result,
+        };
+        sendToNinja("GET_URL");
+        break;
+      case "GET_URL":
         sendToNinja("NOTIFY", {
           icon: "result",
-          message: `Game ${roundNumber} ended ${value.result.player1}-${value.result.player2}`,
+          message: `Game ${previousGame.roundNumber} ended ${previousGame.result.player1}-${previousGame.result.player2}`,
           position: "top-right",
           actions: [
             {
@@ -391,7 +399,7 @@ window.addEventListener(
               label: "View",
               icon: "open_in_new",
               action: "VIEW_FINISHED_GAME",
-              value: value.url,
+              value,
             },
             {
               icon: "close",
