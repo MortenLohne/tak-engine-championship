@@ -244,6 +244,30 @@ function setCurrentAnalysis() {
   }
 }
 
+function saveAnalysisToNotes() {
+  const notes = {};
+  gameState.moves.slice(moveCount).forEach((move, i) => {
+    const plyID = i + moveCount + gameState.openingMoves.length;
+
+    // Eval comment
+    if (gameState.moves[moveCount + i - 1]) {
+      if (!(plyID - 1 in notes)) {
+        notes[plyID - 1] = [];
+      }
+      notes[plyID - 1].push(formatEvalComment(move.uciInfo, 1 + (plyID % 2)));
+    }
+
+    // PV comment
+    if (!(plyID in notes)) {
+      notes[plyID] = [];
+    }
+    notes[plyID].push(formatPVComment(move.uciInfo));
+  });
+  if (Object.keys(notes).length) {
+    sendToNinja("ADD_NOTES", notes);
+  }
+}
+
 function formatEvalComment(uciInfo, turn) {
   let { evaluation, depth, nodes, time } = formatAnalysis(uciInfo, turn);
   evaluation /= 100;
@@ -286,7 +310,7 @@ function updateGameState() {
   ) {
     // New game
     roundNumber = gameState.roundNumber;
-    moveCount = gameState.moves.length;
+    moveCount = 0;
     let ptn = `[TPS "${gameState.openingTps}"]`;
     ptn += `\n[Player1 "${formatName(gameState.whitePlayer)}"]`;
     ptn += `\n[Player2 "${formatName(gameState.blackPlayer)}"]`;
@@ -303,60 +327,14 @@ function updateGameState() {
     sendToNinja("SET_NAME", `Tak Engine Championship: Game ${roundNumber}`);
     sendToNinja("SET_CURRENT_PTN", ptn);
     sendToNinja("LAST");
-
-    const notes = {};
-    gameState.moves.forEach((move, i) => {
-      if (move.uciInfo) {
-        const plyID = i + gameState.openingMoves.length;
-
-        // Eval comment
-        if (i > 0) {
-          if (!(plyID - 1 in notes)) {
-            notes[plyID - 1] = [];
-          }
-          notes[plyID - 1].push(
-            formatEvalComment(move.uciInfo, 1 + (plyID % 2))
-          );
-        }
-
-        // PV comment
-        if (!(plyID in notes)) {
-          notes[plyID] = [];
-        }
-        notes[plyID].push(formatPVComment(move.uciInfo));
-      }
-    });
-    if (Object.keys(notes).length) {
-      sendToNinja("ADD_NOTES", notes);
-    }
+    saveAnalysisToNotes();
+    moveCount = gameState.moves.length;
   } else if (moveCount < gameState.moves.length) {
     // New move(s)
     gameState.moves.slice(moveCount).forEach((move) => {
       sendToNinja("APPEND_PLY", move.move);
     });
-
-    // Add notes, including pv from previous move
-    const notes = {};
-    gameState.moves.slice(moveCount).forEach((move, i) => {
-      const plyID = i + moveCount + gameState.openingMoves.length;
-
-      // Eval comment
-      if (gameState.moves[moveCount + i - 1]) {
-        if (!(plyID - 1 in notes)) {
-          notes[plyID - 1] = [];
-        }
-        notes[plyID - 1].push(formatEvalComment(move.uciInfo, 1 + (plyID % 2)));
-      }
-
-      // PV comment
-      if (!(plyID in notes)) {
-        notes[plyID] = [];
-      }
-      notes[plyID].push(formatPVComment(move.uciInfo));
-    });
-    if (Object.keys(notes).length) {
-      sendToNinja("ADD_NOTES", notes);
-    }
+    saveAnalysisToNotes();
     moveCount = gameState.moves.length;
   } else {
     // New analysis
