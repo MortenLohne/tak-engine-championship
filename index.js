@@ -78,12 +78,44 @@ function setChartSettings(key, value) {
 
 //#region Chart initialization
 const chartContainer = document.getElementById("chart-wrapper");
+
+const verticalLinePlugin = {
+  getLinePosition(chart, pointIndex) {
+    const meta = chart.getDatasetMeta(0); // first dataset is used to discover X coordinate of a point
+    const data = meta.data;
+    return data[pointIndex]?.x;
+  },
+
+  renderVerticalLine(chartInstance, pointIndex) {
+    const lineLeftOffset = this.getLinePosition(chartInstance, pointIndex);
+    if (lineLeftOffset === null) {
+      return;
+    }
+    const scale = chartInstance.scales.y;
+    const context = chartInstance.ctx;
+    // render vertical line
+    context.beginPath();
+    context.strokeStyle = theme.colors.primary;
+    context.moveTo(lineLeftOffset, scale.top);
+    context.lineTo(lineLeftOffset, scale.bottom);
+    context.stroke();
+  },
+
+  beforeDatasetsDraw(chart) {
+    if (chart.config._config.lineAtIndex !== null) {
+      this.renderVerticalLine(chart, chart.config._config.lineAtIndex);
+    }
+  },
+};
+
 const chart = new Chart(document.getElementById("chart"), {
   type: "line",
   data: {
     labels: [],
     datasets: [],
   },
+  lineAtIndex: null,
+  plugins: [verticalLinePlugin],
   options: {
     animations: false,
     maintainAspectRatio: false,
@@ -205,6 +237,11 @@ function resizeChart() {
 }
 resizeChart();
 window.addEventListener("resize", resizeChart);
+
+function updateChartVerticalLine(plyID = null) {
+  chart.config._config.lineAtIndex = plyID - gameState.openingMoves.length + 1;
+  chart.update();
+}
 
 function updateTheme(newTheme) {
   theme = newTheme;
@@ -403,6 +440,11 @@ window.addEventListener(
         ninjaGameState = value;
         // Show analysis for current position if possible
         setCurrentAnalysis();
+
+        // Update vertical line
+        if (!ninjaGameState.isAtEndOfMainBranch) {
+          updateChartVerticalLine(ninjaGameState.boardPly?.id);
+        }
         break;
       case "GET_THEME":
         updateTheme(value);
