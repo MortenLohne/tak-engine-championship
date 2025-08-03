@@ -252,26 +252,26 @@ function saveAnalysisToNotes() {
   moves.slice(openingMoveCount + moveCount).forEach((move, i) => {
     const plyID = i + openingMoveCount + moveCount;
 
-    // Eval comment
+    // Eval note
     if (moves[plyID - 1]) {
       if (!(plyID - 1 in notes)) {
         notes[plyID - 1] = [];
       }
-      notes[plyID - 1].push(formatEvalComment(move.uciInfo, 1 + (plyID % 2)));
+      notes[plyID - 1].push(formatEvalNote(move.uciInfo, 1 + (plyID % 2)));
     }
 
-    // PV comment
+    // PV note
     if (!(plyID in notes)) {
       notes[plyID] = [];
     }
-    notes[plyID].push(formatPVComment(move.uciInfo));
+    notes[plyID].push(formatPVNote(move.uciInfo));
   });
   if (Object.keys(notes).length) {
     sendToNinja("ADD_NOTES", notes);
   }
 }
 
-function formatEvalComment(uciInfo, turn) {
+function formatEvalNote(uciInfo, turn) {
   let { evaluation, depth, nodes, time } = formatAnalysis(uciInfo, turn);
   evaluation = Math.round(10 * evaluation) / 1000;
   if (evaluation >= 0) {
@@ -283,7 +283,7 @@ function formatEvalComment(uciInfo, turn) {
   return `${evaluation}${depth || ""} ${nodes} nodes ${time}ms`;
 }
 
-function formatPVComment(uciInfo) {
+function formatPVNote(uciInfo) {
   return `pv ${uciInfo.pv.join(" ")}`;
 }
 
