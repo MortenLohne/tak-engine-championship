@@ -247,11 +247,13 @@ function setCurrentAnalysis() {
 
 function saveAnalysisToNotes() {
   const notes = {};
-  gameState.moves.slice(moveCount).forEach((move, i) => {
-    const plyID = i + moveCount + gameState.openingMoves.length;
+  const moves = gameState.openingMoves.concat(gameState.moves);
+  const openingMoveCount = gameState.openingMoves.length;
+  moves.slice(openingMoveCount + moveCount).forEach((move, i) => {
+    const plyID = i + openingMoveCount + moveCount;
 
     // Eval comment
-    if (gameState.moves[moveCount + i - 1]) {
+    if (moves[plyID - 1]) {
       if (!(plyID - 1 in notes)) {
         notes[plyID - 1] = [];
       }
