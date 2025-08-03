@@ -74,6 +74,7 @@ const chart = new Chart(document.getElementById("chart"), {
       const plyID =
         chart.scales.x.getValueForPixel(x) + gameState.openingMoves.length - 1;
       sendToNinja("GO_TO_PLY", { plyID, isDone: true });
+      ninja.focus();
     },
     scales: {
       x: {
