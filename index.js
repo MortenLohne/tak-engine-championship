@@ -442,9 +442,11 @@ window.addEventListener(
         setCurrentAnalysis();
 
         // Update vertical line
-        if (!ninjaGameState.isAtEndOfMainBranch) {
-          updateChartVerticalLine(ninjaGameState.boardPly?.id);
-        }
+        updateChartVerticalLine(
+          ninjaGameState.isAtEndOfMainBranch
+            ? null
+            : ninjaGameState.boardPly?.id
+        );
         break;
       case "GET_THEME":
         updateTheme(value);
