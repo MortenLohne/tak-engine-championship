@@ -204,9 +204,9 @@ function formatName(name) {
 }
 
 function formatAnalysis(uciInfo, currentPlayer, tps = null) {
-  const { cpScore, depth, hashfull, nodes, nps, pv, seldepth, time } = uciInfo;
+  const { depth, hashfull, nodes, nps, pv, seldepth, time } = uciInfo;
 
-  let evaluation = cpScore;
+  let evaluation = winningProbability(uciInfo);
 
   if (currentPlayer === 2) {
     evaluation = -evaluation;
@@ -225,28 +225,33 @@ function formatAnalysis(uciInfo, currentPlayer, tps = null) {
   };
 }
 
-function setAnalysis(
-  plyID,
-  currentPlayer,
-  tps = null,
-  isAtEndOfMainBranch = false
-) {
-  if (isAtEndOfMainBranch && gameState.currentMoveUciInfo) {
+function setCurrentAnalysis() {
+  if (
+    gameState &&
+    gameState.currentMoveUciInfo &&
+    ninjaGameState.isAtEndOfMainBranch
+  ) {
     sendToNinja(
       "SET_ANALYSIS",
-      formatAnalysis(gameState.currentMoveUciInfo, currentPlayer)
+      formatAnalysis(gameState.currentMoveUciInfo, ninjaGameState.turn)
     );
   }
-  if (plyID < gameState.openingMoves.length) {
-    return null;
+}
+
+function formatEvalComment(uciInfo, turn) {
+  let { evaluation, depth, nodes, time } = formatAnalysis(uciInfo, turn);
+  evaluation /= 100;
+  if (evaluation >= 0) {
+    evaluation = `+${evaluation}`;
   }
-  const move = gameState.moves[plyID - gameState.openingMoves.length + 1];
-  if (move && move.uciInfo) {
-    sendToNinja(
-      "SET_ANALYSIS",
-      formatAnalysis(move.uciInfo, currentPlayer, tps)
-    );
+  if (depth) {
+    depth = `/${depth}`;
   }
+  return `${evaluation}${depth} ${nodes} nodes ${time}ms`;
+}
+
+function formatPVComment(uciInfo) {
+  return `pv ${uciInfo.pv.join(" ")}`;
 }
 
 async function fetchLoop() {
@@ -289,21 +294,64 @@ function updateGameState() {
     sendToNinja("SET_NAME", `Tak Engine Championship: Game ${roundNumber}`);
     sendToNinja("SET_CURRENT_PTN", ptn);
     sendToNinja("LAST");
+
+    const notes = {};
+    gameState.moves.forEach((move, i) => {
+      if (move.uciInfo) {
+        const plyID = i + gameState.openingMoves.length;
+
+        // Eval comment
+        if (i > 0) {
+          if (!(plyID - 1 in notes)) {
+            notes[plyID - 1] = [];
+          }
+          notes[plyID - 1].push(
+            formatEvalComment(move.uciInfo, 1 + (plyID % 2))
+          );
+        }
+
+        // PV comment
+        if (!(plyID in notes)) {
+          notes[plyID] = [];
+        }
+        notes[plyID].push(formatPVComment(move.uciInfo));
+      }
+    });
+    if (Object.keys(notes).length) {
+      sendToNinja("ADD_NOTES", notes);
+    }
   } else if (moveCount < gameState.moves.length) {
     // New move(s)
     gameState.moves.slice(moveCount).forEach((move) => {
       sendToNinja("APPEND_PLY", move.move);
     });
+
+    // Add notes, including pv from previous move
+    const notes = {};
+    gameState.moves.slice(moveCount).forEach((move, i) => {
+      const plyID = i + moveCount + gameState.openingMoves.length;
+
+      // Eval comment
+      if (gameState.moves[moveCount + i - 1]) {
+        if (!(plyID - 1 in notes)) {
+          notes[plyID - 1] = [];
+        }
+        notes[plyID - 1].push(formatEvalComment(move.uciInfo, 1 + (plyID % 2)));
+      }
+
+      // PV comment
+      if (!(plyID in notes)) {
+        notes[plyID] = [];
+      }
+      notes[plyID].push(formatPVComment(move.uciInfo));
+    });
+    if (Object.keys(notes).length) {
+      sendToNinja("ADD_NOTES", notes);
+    }
     moveCount = gameState.moves.length;
-  } else if (
-    ninjaGameState.isAtEndOfMainBranch &&
-    gameState.currentMoveUciInfo
-  ) {
+  } else {
     // New analysis
-    sendToNinja(
-      "SET_ANALYSIS",
-      formatAnalysis(gameState.currentMoveUciInfo, ninjaGameState.turn)
-    );
+    setCurrentAnalysis();
   }
 
   // Update the eval chart
@@ -336,15 +384,8 @@ window.addEventListener(
           }
         }
         ninjaGameState = value;
-        if (gameState) {
-          // Show analysis for current position
-          setAnalysis(
-            ninjaGameState.boardPly ? ninjaGameState.boardPly.id : -1,
-            ninjaGameState.turn,
-            ninjaGameState.tps,
-            ninjaGameState.isAtEndOfMainBranch
-          );
-        }
+        // Show analysis for current position if possible
+        setCurrentAnalysis();
         break;
       case "GET_THEME":
         updateTheme(value);
