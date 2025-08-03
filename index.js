@@ -57,6 +57,25 @@ function updateNinjaSettings(settings) {
   }
 }
 
+//#region Chart settings
+const chartSettingsStorageKey = "chartSettings";
+let chartSettings = localStorage.getItem(chartSettingsStorageKey);
+if (chartSettings) {
+  chartSettings = JSON.parse(chartSettings);
+} else {
+  chartSettings = {
+    fixYAxis: false,
+  };
+}
+function setChartSettings(key, value) {
+  chartSettings[key] = value;
+  localStorage.setItem(chartSettingsStorageKey, JSON.stringify(chartSettings));
+  const scale = chartSettings.fixYAxis ? 100 : 10;
+  chart.config.options.scales.y.suggestedMax = scale;
+  chart.config.options.scales.y.suggestedMin = -scale;
+  chart.update();
+}
+
 //#region Chart initialization
 const chartContainer = document.getElementById("chart-wrapper");
 const chart = new Chart(document.getElementById("chart"), {
@@ -68,14 +87,18 @@ const chart = new Chart(document.getElementById("chart"), {
   options: {
     animations: false,
     maintainAspectRatio: false,
-    interaction: {
-      mode: "x",
-    },
     onClick: ({ x }) => {
       const plyID =
         chart.scales.x.getValueForPixel(x) + gameState.openingMoves.length - 1;
       sendToNinja("GO_TO_PLY", { plyID, isDone: true });
       ninja.focus();
+    },
+    plugins: {
+      legend: {
+        onClick: () => {
+          setChartSettings("fixYAxis", !chartSettings.fixYAxis);
+        },
+      },
     },
     tension: 0.3,
     pointRadius: 2,
@@ -99,8 +122,8 @@ const chart = new Chart(document.getElementById("chart"), {
         },
       },
       y: {
-        suggestedMin: -100,
-        suggestedMax: 100,
+        suggestedMin: chartSettings.fixYAxis ? -100 : -10,
+        suggestedMax: chartSettings.fixYAxis ? 100 : 10,
         ticks: {
           color: () => {
             return theme
