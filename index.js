@@ -270,7 +270,7 @@ function saveAnalysisToNotes() {
 
 function formatEvalComment(uciInfo, turn) {
   let { evaluation, depth, nodes, time } = formatAnalysis(uciInfo, turn);
-  evaluation /= 100;
+  evaluation = (evaluation / 100).toPrecision(4);
   if (evaluation >= 0) {
     evaluation = `+${evaluation}`;
   }
