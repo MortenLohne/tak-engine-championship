@@ -76,6 +76,10 @@ const chart = new Chart(document.getElementById("chart"), {
       sendToNinja("GO_TO_PLY", { plyID, isDone: true });
       ninja.focus();
     },
+    tension: 0.3,
+    pointRadius: 2,
+    pointBorderWidth: 2,
+    pointHoverBorderWidth: 5,
     scales: {
       x: {
         ticks: {
@@ -162,9 +166,6 @@ function updateChart() {
           above: player1FillColor,
           below: player2FillColor,
         },
-        tension: 0.3,
-        pointBorderWidth: 3,
-        pointHoverBorderWidth: 5,
       },
       {
         label: `${formatName(gameState.blackPlayer)}'s evaluation`,
@@ -177,9 +178,6 @@ function updateChart() {
           above: player1FillColor,
           below: player2FillColor,
         },
-        tension: 0.3,
-        pointBorderWidth: 3,
-        pointHoverBorderWidth: 5,
       },
     ].sort((a) => (a.data[a.data.length - 1] === null ? 1 : -1)),
   };
