@@ -12,6 +12,13 @@ let previousGame = null;
 let ninjaGameState = null;
 let theme = null;
 
+const ninja = document.getElementById("ninja").contentWindow;
+
+function sendToNinja(action, value) {
+  ninja.postMessage({ action, value }, "*");
+}
+
+//#region PTN Ninja settings
 const ninjaSettingsToSave = [
   "axisLabels",
   "axisLabelsSmall",
@@ -26,13 +33,6 @@ let ninjaSettings = localStorage.getItem(ninjaSettingsStorageKey);
 if (ninjaSettings) {
   ninjaSettings = JSON.parse(ninjaSettings);
 }
-
-const ninja = document.getElementById("ninja").contentWindow;
-
-function sendToNinja(action, value) {
-  ninja.postMessage({ action, value }, "*");
-}
-
 function updateNinjaSettings(settings) {
   if ("themeID" in settings) {
     sendToNinja("GET_THEME");
@@ -57,6 +57,26 @@ function updateNinjaSettings(settings) {
   }
 }
 
+//#region Chart settings
+const chartSettingsStorageKey = "chartSettings";
+let chartSettings = localStorage.getItem(chartSettingsStorageKey);
+if (chartSettings) {
+  chartSettings = JSON.parse(chartSettings);
+} else {
+  chartSettings = {
+    fixYAxis: false,
+  };
+}
+function setChartSettings(key, value) {
+  chartSettings[key] = value;
+  localStorage.setItem(chartSettingsStorageKey, JSON.stringify(chartSettings));
+  const scale = chartSettings.fixYAxis ? 100 : 10;
+  chart.config.options.scales.y.suggestedMax = scale;
+  chart.config.options.scales.y.suggestedMin = -scale;
+  chart.update();
+}
+
+//#region Chart initialization
 const chartContainer = document.getElementById("chart-wrapper");
 const chart = new Chart(document.getElementById("chart"), {
   type: "line",
@@ -67,15 +87,23 @@ const chart = new Chart(document.getElementById("chart"), {
   options: {
     animations: false,
     maintainAspectRatio: false,
-    interaction: {
-      mode: "x",
-    },
     onClick: ({ x }) => {
       const plyID =
         chart.scales.x.getValueForPixel(x) + gameState.openingMoves.length - 1;
       sendToNinja("GO_TO_PLY", { plyID, isDone: true });
       ninja.focus();
     },
+    plugins: {
+      legend: {
+        onClick: () => {
+          setChartSettings("fixYAxis", !chartSettings.fixYAxis);
+        },
+      },
+    },
+    tension: 0.3,
+    pointRadius: 2,
+    pointBorderWidth: 2,
+    pointHoverBorderWidth: 5,
     scales: {
       x: {
         ticks: {
@@ -94,8 +122,8 @@ const chart = new Chart(document.getElementById("chart"), {
         },
       },
       y: {
-        suggestedMin: -100,
-        suggestedMax: 100,
+        suggestedMin: chartSettings.fixYAxis ? -100 : -10,
+        suggestedMax: chartSettings.fixYAxis ? 100 : 10,
         ticks: {
           color: () => {
             return theme
@@ -122,15 +150,7 @@ const player1FillColor = () =>
 const player2FillColor = () =>
   theme?.colors.player2clear.replace(/00$/, "33") || "black";
 
-// Extract winning probability, as a number between -100 and 100
-function winningProbability(uciInfo) {
-  if (uciInfo?.wdl) {
-    return uciInfo.wdl[0] / 5 + uciInfo.wdl[1] / 10 - 100;
-  } else {
-    return uciInfo?.cpScore || 0;
-  }
-}
-
+//#region Chart sync
 function updateChart() {
   if (!gameState) {
     return;
@@ -162,9 +182,6 @@ function updateChart() {
           above: player1FillColor,
           below: player2FillColor,
         },
-        tension: 0.3,
-        pointBorderWidth: 3,
-        pointHoverBorderWidth: 5,
       },
       {
         label: `${formatName(gameState.blackPlayer)}'s evaluation`,
@@ -177,9 +194,6 @@ function updateChart() {
           above: player1FillColor,
           below: player2FillColor,
         },
-        tension: 0.3,
-        pointBorderWidth: 3,
-        pointHoverBorderWidth: 5,
       },
     ].sort((a) => (a.data[a.data.length - 1] === null ? 1 : -1)),
   };
@@ -207,6 +221,7 @@ function updateTheme(newTheme) {
   chart.update();
 }
 
+//#region Formatting helpers
 function formatName(name) {
   return name.replace(/^(.*[\/\\])/g, "");
 }
@@ -233,45 +248,6 @@ function formatAnalysis(uciInfo, currentPlayer, tps = null) {
   };
 }
 
-function setCurrentAnalysis() {
-  if (
-    gameState &&
-    gameState.currentMoveUciInfo &&
-    ninjaGameState.isAtEndOfMainBranch
-  ) {
-    sendToNinja(
-      "SET_ANALYSIS",
-      formatAnalysis(gameState.currentMoveUciInfo, ninjaGameState.turn)
-    );
-  }
-}
-
-function saveAnalysisToNotes() {
-  const notes = {};
-  const moves = gameState.openingMoves.concat(gameState.moves);
-  const openingMoveCount = gameState.openingMoves.length;
-  moves.slice(openingMoveCount + moveCount).forEach((move, i) => {
-    const plyID = i + openingMoveCount + moveCount;
-
-    // Eval note
-    if (moves[plyID - 1]) {
-      if (!(plyID - 1 in notes)) {
-        notes[plyID - 1] = [];
-      }
-      notes[plyID - 1].push(formatEvalNote(move.uciInfo, 1 + (plyID % 2)));
-    }
-
-    // PV note
-    if (!(plyID in notes)) {
-      notes[plyID] = [];
-    }
-    notes[plyID].push(formatPVNote(move.uciInfo));
-  });
-  if (Object.keys(notes).length) {
-    sendToNinja("ADD_NOTES", notes);
-  }
-}
-
 function formatEvalNote(uciInfo, turn) {
   let { evaluation, depth, nodes, time } = formatAnalysis(uciInfo, turn);
   evaluation = Math.round(10 * evaluation) / 1000;
@@ -288,6 +264,16 @@ function formatPVNote(uciInfo) {
   return `pv ${uciInfo.pv.join(" ")}`;
 }
 
+// Extract winning probability, as a number between -100 and 100
+function winningProbability(uciInfo) {
+  if (uciInfo?.wdl) {
+    return uciInfo.wdl[0] / 5 + uciInfo.wdl[1] / 10 - 100;
+  } else {
+    return uciInfo?.cpScore || 0;
+  }
+}
+
+//#region Server sync
 async function fetchLoop() {
   const evtSource = new EventSource(SERVER_URL + "/0/sse");
 
@@ -349,7 +335,47 @@ function updateGameState() {
   updateChart();
 }
 
-//#region PTN Ninja init
+//#region PTN Ninja sync
+
+function setCurrentAnalysis() {
+  if (
+    gameState &&
+    gameState.currentMoveUciInfo &&
+    ninjaGameState.isAtEndOfMainBranch
+  ) {
+    sendToNinja(
+      "SET_ANALYSIS",
+      formatAnalysis(gameState.currentMoveUciInfo, ninjaGameState.turn)
+    );
+  }
+}
+
+function saveAnalysisToNotes() {
+  const notes = {};
+  const moves = gameState.openingMoves.concat(gameState.moves);
+  const openingMoveCount = gameState.openingMoves.length;
+  moves.slice(openingMoveCount + moveCount).forEach((move, i) => {
+    const plyID = i + openingMoveCount + moveCount;
+
+    // Eval note
+    if (moves[plyID - 1]) {
+      if (!(plyID - 1 in notes)) {
+        notes[plyID - 1] = [];
+      }
+      notes[plyID - 1].push(formatEvalNote(move.uciInfo, 1 + (plyID % 2)));
+    }
+
+    // PV note
+    if (!(plyID in notes)) {
+      notes[plyID] = [];
+    }
+    notes[plyID].push(formatPVNote(move.uciInfo));
+  });
+  if (Object.keys(notes).length) {
+    sendToNinja("ADD_NOTES", notes);
+  }
+}
+
 window.addEventListener(
   "message",
   (event) => {
