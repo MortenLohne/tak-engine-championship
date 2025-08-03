@@ -180,7 +180,7 @@ function updateChart() {
         pointBorderWidth: 3,
         pointHoverBorderWidth: 5,
       },
-    ],
+    ].sort((a) => (a.data[a.data.length - 1] === null ? 1 : -1)),
   };
   chart.update();
 }
