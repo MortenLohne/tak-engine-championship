@@ -1,8 +1,8 @@
 import { applyPatch } from "https://esm.sh/fast-json-patch@3.1.1";
 import Chart from "https://esm.sh/chart.js@4.5.0/auto";
 
-const SERVER_URL = "http://localhost:23456";
-// const SERVER_URL = "https://racetrack.mortenlohne.no";
+// const SERVER_URL = "http://localhost:23456";
+const SERVER_URL = "https://racetrack.mortenlohne.no";
 
 let gameState = null;
 let roundNumber = 0;
