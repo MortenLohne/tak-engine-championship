@@ -274,7 +274,10 @@ async function fetchLoop() {
 }
 
 function updateGameState() {
-  if (roundNumber !== gameState.roundNumber) {
+  if (
+    roundNumber !== gameState.roundNumber ||
+    moveCount > gameState.moves.length
+  ) {
     // New game
     roundNumber = gameState.roundNumber;
     moveCount = gameState.moves.length;
