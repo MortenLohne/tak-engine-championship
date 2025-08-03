@@ -278,7 +278,7 @@ function formatEvalComment(uciInfo, turn) {
   if (depth) {
     depth = `/${depth}`;
   }
-  return `${evaluation}${depth} ${nodes} nodes ${time}ms`;
+  return `${evaluation}${depth || ""} ${nodes} nodes ${time}ms`;
 }
 
 function formatPVComment(uciInfo) {
