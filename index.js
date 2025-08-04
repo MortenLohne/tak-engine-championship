@@ -195,10 +195,12 @@ function updateChart() {
     };
   });
 
-  scores.push({
-    ply: scores.length + gameState.openingMoves.length,
-    score: winningProbability(gameState.currentMoveUciInfo),
-  });
+  if (gameState.currentMoveUciInfo) {
+    scores.push({
+      ply: scores.length + gameState.openingMoves.length,
+      score: winningProbability(gameState.currentMoveUciInfo),
+    });
+  }
 
   chart.data = {
     labels: scores.map((row) => (row.ply + 1) / 2),
