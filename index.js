@@ -321,9 +321,15 @@ function winningProbability(uciInfo) {
 //#region Server sync
 
 async function fetchLoop() {
+  // Note: Opening an EventSource will not throw, even if the server cannot be reached
   const evtSource = new EventSource(SERVER_URL + "/0/sse");
 
+  evtSource.onopen = () => {
+    document.getElementById("loading-text").innerHTML = "Loading games...";
+  };
+
   evtSource.onmessage = (event) => {
+    document.getElementById("loading").style.display = "none";
     const patch = JSON.parse(event.data);
     gameState = applyPatch(gameState, patch).newDocument;
     if (gameState !== null) {
@@ -332,7 +338,9 @@ async function fetchLoop() {
   };
 
   evtSource.onerror = (error) => {
-    console.error("Error in SSE connection:", error);
+    document.getElementById("loading").style.display = "block";
+    document.getElementById("loading-text").innerHTML = "Lost connection to the server, reconnecting...";
+    console.error("Connection error: ", error);
     gameState = null;
     evtSource.close();
     window.setTimeout(fetchLoop, 2000);
