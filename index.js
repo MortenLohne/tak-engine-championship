@@ -243,7 +243,10 @@ resizeChart();
 window.addEventListener("resize", resizeChart);
 
 function updateChartVerticalLine(plyID = null) {
-  chart.config._config.lineAtIndex = plyID - gameState.openingMoves.length + 1;
+  chart.config._config.lineAtIndex =
+    gameState && plyID !== null
+      ? plyID - gameState.openingMoves.length + 1
+      : null;
   chart.update();
 }
 
