@@ -203,7 +203,7 @@ function updateChart() {
   }
 
   chart.data = {
-    labels: scores.map((row) => (row.ply + 1) / 2),
+    labels: scores.map((row) => 1 + row.ply / 2),
     datasets: [
       {
         label: `${formatName(gameState.whitePlayer)}'s evaluation`,
