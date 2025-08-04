@@ -19,6 +19,7 @@ function sendToNinja(action, value) {
 }
 
 //#region PTN Ninja settings
+
 const ninjaSettingsToSave = [
   "axisLabels",
   "axisLabelsSmall",
@@ -58,6 +59,7 @@ function updateNinjaSettings(settings) {
 }
 
 //#region Chart settings
+
 const chartSettingsStorageKey = "chartSettings";
 let chartSettings = localStorage.getItem(chartSettingsStorageKey);
 if (chartSettings) {
@@ -77,6 +79,7 @@ function setChartSettings(key, value) {
 }
 
 //#region Chart initialization
+
 const chartContainer = document.getElementById("chart-wrapper");
 
 const verticalLinePlugin = {
@@ -183,6 +186,7 @@ const player2FillColor = () =>
   theme?.colors.player2clear.replace(/00$/, "33") || "black";
 
 //#region Chart sync
+
 function updateChart() {
   if (!gameState) {
     return;
@@ -241,7 +245,10 @@ resizeChart();
 window.addEventListener("resize", resizeChart);
 
 function updateChartVerticalLine(plyID = null) {
-  chart.config._config.lineAtIndex = plyID - gameState.openingMoves.length + 1;
+  chart.config._config.lineAtIndex =
+    gameState && plyID !== null
+      ? plyID - gameState.openingMoves.length + 1
+      : null;
   chart.update();
 }
 
@@ -261,6 +268,7 @@ function updateTheme(newTheme) {
 }
 
 //#region Formatting helpers
+
 function formatName(name) {
   return name.replace(/^(.*[\/\\])/g, "");
 }
@@ -313,10 +321,17 @@ function winningProbability(uciInfo) {
 }
 
 //#region Server sync
+
 async function fetchLoop() {
+  // Note: Opening an EventSource will not throw, even if the server cannot be reached
   const evtSource = new EventSource(SERVER_URL + "/0/sse");
 
+  evtSource.onopen = () => {
+    document.getElementById("loading-text").innerHTML = "Loading games...";
+  };
+
   evtSource.onmessage = (event) => {
+    document.getElementById("loading").style.display = "none";
     const patch = JSON.parse(event.data);
     gameState = applyPatch(gameState, patch).newDocument;
     if (gameState !== null) {
@@ -325,7 +340,9 @@ async function fetchLoop() {
   };
 
   evtSource.onerror = (error) => {
-    console.error("Error in SSE connection:", error);
+    document.getElementById("loading").style.display = "block";
+    document.getElementById("loading-text").innerHTML = "Lost connection to the server, reconnecting...";
+    console.error("Connection error: ", error);
     gameState = null;
     evtSource.close();
     window.setTimeout(fetchLoop, 2000);
