@@ -19,6 +19,7 @@ function sendToNinja(action, value) {
 }
 
 //#region PTN Ninja settings
+
 const ninjaSettingsToSave = [
   "axisLabels",
   "axisLabelsSmall",
@@ -58,6 +59,7 @@ function updateNinjaSettings(settings) {
 }
 
 //#region Chart settings
+
 const chartSettingsStorageKey = "chartSettings";
 let chartSettings = localStorage.getItem(chartSettingsStorageKey);
 if (chartSettings) {
@@ -77,6 +79,7 @@ function setChartSettings(key, value) {
 }
 
 //#region Chart initialization
+
 const chartContainer = document.getElementById("chart-wrapper");
 
 const verticalLinePlugin = {
@@ -183,6 +186,7 @@ const player2FillColor = () =>
   theme?.colors.player2clear.replace(/00$/, "33") || "black";
 
 //#region Chart sync
+
 function updateChart() {
   if (!gameState) {
     return;
@@ -259,6 +263,7 @@ function updateTheme(newTheme) {
 }
 
 //#region Formatting helpers
+
 function formatName(name) {
   return name.replace(/^(.*[\/\\])/g, "");
 }
@@ -311,6 +316,7 @@ function winningProbability(uciInfo) {
 }
 
 //#region Server sync
+
 async function fetchLoop() {
   const evtSource = new EventSource(SERVER_URL + "/0/sse");
 
