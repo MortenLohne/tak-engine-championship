@@ -233,7 +233,7 @@ function updateChart() {
           below: player2FillColor,
         },
       },
-    ].sort((a) => (a.data[a.data.length - 1] === null ? 1 : -1)),
+    ],
   };
   chart.update();
 }
