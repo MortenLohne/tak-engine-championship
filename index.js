@@ -23,6 +23,8 @@ function sendToNinja(action, value) {
 const ninjaSettingsToSave = [
   "axisLabels",
   "axisLabelsSmall",
+  "boardEvalBar",
+  "showEval",
   "showMove",
   "showPTN",
   "showToolbarAnalysis",
@@ -341,7 +343,8 @@ async function fetchLoop() {
 
   evtSource.onerror = (error) => {
     document.getElementById("loading").style.display = "block";
-    document.getElementById("loading-text").innerHTML = "Lost connection to the server, reconnecting...";
+    document.getElementById("loading-text").innerHTML =
+      "Lost connection to the server, reconnecting...";
     console.error("Connection error: ", error);
     gameState = null;
     evtSource.close();
