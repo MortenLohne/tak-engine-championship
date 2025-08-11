@@ -342,7 +342,7 @@ async function fetchLoop() {
   };
 
   evtSource.onerror = (error) => {
-    document.getElementById("loading").style.display = "block";
+    document.getElementById("loading").style.display = "";
     document.getElementById("loading-text").innerHTML =
       "Lost connection to the server, reconnecting...";
     console.error("Connection error: ", error);
