@@ -1,13 +1,14 @@
 import { applyPatch } from "https://esm.sh/fast-json-patch@3.1.1";
 import Chart from "https://esm.sh/chart.js@4.5.0/auto";
 
-// const SERVER_URL = "http://localhost:23456";
+// const SERVER_URL = "http://192.168.1.2:23456";
 const SERVER_URL = "https://racetrack.mortenlohne.no";
 
 let gameState = null;
 let roundNumber = 0;
 let moveCount = 0;
 let previousGame = null;
+let savedNotePlies = new Set(); // Track plies with final notes saved
 
 let ninjaGameState = null;
 let theme = null;
@@ -55,7 +56,7 @@ function updateNinjaSettings(settings) {
   if (hasChanged) {
     localStorage.setItem(
       ninjaSettingsStorageKey,
-      JSON.stringify(ninjaSettings)
+      JSON.stringify(ninjaSettings),
     );
   }
 }
@@ -125,9 +126,20 @@ const chart = new Chart(document.getElementById("chart"), {
     animations: false,
     maintainAspectRatio: false,
     onClick: ({ x }) => {
-      const plyID =
-        chart.scales.x.getValueForPixel(x) + gameState.openingMoves.length - 1;
-      sendToNinja("GO_TO_PLY", { plyID, isDone: true });
+      // Get the data index from the click position, clamped to valid range
+      const rawIndex = Math.round(chart.scales.x.getValueForPixel(x));
+      const labelsLength = chart.data.labels.length;
+      const dataIndex = Math.max(0, Math.min(rawIndex, labelsLength - 1));
+      // data[i] shows analysis BEFORE move i was made (the position the engine analyzed)
+      // So clicking data[0] should go to plyID=0, isDone=false (before first move)
+      // For the last data point, use LAST to go to end of main branch
+      const isLastNode = dataIndex >= labelsLength - 1;
+      if (isLastNode) {
+        sendToNinja("LAST");
+      } else {
+        const plyID = dataIndex + gameState.openingMoves.length;
+        sendToNinja("GO_TO_PLY", { plyID, isDone: false });
+      }
       ninja.focus();
     },
     plugins: {
@@ -194,9 +206,9 @@ function updateChart() {
     return;
   }
 
-  let scores = gameState.moves.map((move, ply) => {
+  let scores = gameState.moves.map((move, i) => {
     return {
-      ply: ply + gameState.openingMoves.length,
+      ply: i + gameState.openingMoves.length,
       score: winningProbability(move.uciInfo),
     };
   });
@@ -246,11 +258,19 @@ function resizeChart() {
 resizeChart();
 window.addEventListener("resize", resizeChart);
 
-function updateChartVerticalLine(plyID = null) {
-  chart.config._config.lineAtIndex =
-    gameState && plyID !== null
-      ? plyID - gameState.openingMoves.length + 1
-      : null;
+function updateChartVerticalLine(plyID = null, plyIsDone = true) {
+  let lineAtIndex = null;
+  if (gameState && plyID !== null) {
+    // plyID from PTN Ninja: position in the game
+    // Chart data[i] corresponds to gameState.moves[i]
+    // When plyIsDone=true: we're viewing the result of move plyID, so lineAtIndex = plyID - openingMoves.length + 1
+    // When plyIsDone=false: we're before the move, so lineAtIndex = plyID - openingMoves.length
+    lineAtIndex = plyID - gameState.openingMoves.length + (plyIsDone ? 1 : 0);
+    if (lineAtIndex < 0) {
+      lineAtIndex = 0;
+    }
+  }
+  chart.config._config.lineAtIndex = lineAtIndex;
   chart.update();
 }
 
@@ -275,7 +295,7 @@ function formatName(name) {
   return name.replace(/^(.*[\/\\])/g, "");
 }
 
-function formatAnalysis(uciInfo, currentPlayer, tps = null) {
+function formatAnalysis(uciInfo, currentPlayer, tps = null, botName = null) {
   const { depth, hashfull, nodes, nps, pv, seldepth, time } = uciInfo;
 
   let evaluation = winningProbability(uciInfo);
@@ -294,11 +314,17 @@ function formatAnalysis(uciInfo, currentPlayer, tps = null) {
     pv,
     seldepth,
     time,
+    botName,
   };
 }
 
-function formatEvalNote(uciInfo, turn) {
-  let { evaluation, depth, nodes, time } = formatAnalysis(uciInfo, turn);
+function formatEngineNote(uciInfo, turn, name) {
+  let { evaluation, depth, nodes, nps, pv, time } = formatAnalysis(
+    uciInfo,
+    turn,
+    null,
+    name,
+  );
   evaluation = Math.round(10 * evaluation) / 1000;
   if (evaluation >= 0) {
     evaluation = `+${evaluation}`;
@@ -306,11 +332,9 @@ function formatEvalNote(uciInfo, turn) {
   if (depth) {
     depth = `/${depth}`;
   }
-  return `${evaluation}${depth || ""} ${nodes} nodes ${time}ms`;
-}
 
-function formatPVNote(uciInfo) {
-  return `pv ${uciInfo.pv.join(" ")}`;
+  // Format with new PTN Ninja syntax: name:"engine" eval depth nodes time pv
+  return `name:"${name.replace(/"/g, "")}" ${evaluation}${depth || ""} ${nodes} nodes ${time}ms ${nps}nps pv> ${pv.join(" ")}`;
 }
 
 // Extract winning probability, as a number between -100 and 100
@@ -360,6 +384,7 @@ function updateGameState() {
     // New game
     roundNumber = gameState.roundNumber;
     moveCount = 0;
+    savedNotePlies.clear();
     let ptn = `[TPS "${gameState.openingTps}"]`;
     ptn += `\n[Player1 "${formatName(gameState.whitePlayer)}"]`;
     ptn += `\n[Player2 "${formatName(gameState.blackPlayer)}"]`;
@@ -397,39 +422,86 @@ function updateGameState() {
 //#region PTN Ninja sync
 
 function setCurrentAnalysis() {
-  if (
-    gameState &&
-    gameState.currentMoveUciInfo &&
-    ninjaGameState.isAtEndOfMainBranch
-  ) {
+  if (!gameState || !ninjaGameState) {
+    return;
+  }
+
+  if (ninjaGameState.isAtEndOfMainBranch && gameState.currentMoveUciInfo) {
+    // At the end of the game - show real-time analysis
     sendToNinja(
       "SET_ANALYSIS",
-      formatAnalysis(gameState.currentMoveUciInfo, ninjaGameState.turn)
+      formatAnalysis(
+        gameState.currentMoveUciInfo,
+        ninjaGameState.turn,
+        null,
+        ninjaGameState.turn === 1
+          ? formatName(gameState.whitePlayer)
+          : formatName(gameState.blackPlayer),
+      ),
     );
+    sendToNinja(
+      "SET_EVAL",
+      winningProbability(gameState.currentMoveUciInfo) *
+        (ninjaGameState.turn === 1 ? 1 : -1),
+    );
+  } else {
+    // Historical position - show saved analysis from moves
+    const openingMoveCount = gameState.openingMoves.length;
+    // plyID = moveIndex + openingMoveCount - 1, so moveIndex = plyID - openingMoveCount + 1
+    const moveIndex =
+      ninjaGameState.plyID -
+      openingMoveCount +
+      (ninjaGameState.plyIsDone ? 1 : 0);
+
+    if (moveIndex >= 0 && moveIndex < gameState.moves.length) {
+      const move = gameState.moves[moveIndex];
+      if (move && move.uciInfo) {
+        const turn = ninjaGameState.turn;
+        sendToNinja(
+          "SET_ANALYSIS",
+          formatAnalysis(
+            move.uciInfo,
+            turn,
+            null,
+            turn === 1
+              ? formatName(gameState.whitePlayer)
+              : formatName(gameState.blackPlayer),
+          ),
+        );
+      }
+    } else {
+      // Clear analysis if no data for this position
+      sendToNinja("SET_ANALYSIS", null);
+    }
   }
 }
 
 function saveAnalysisToNotes() {
   const notes = {};
-  const moves = gameState.openingMoves.concat(gameState.moves);
   const openingMoveCount = gameState.openingMoves.length;
-  moves.slice(openingMoveCount + moveCount).forEach((move, i) => {
-    const plyID = i + openingMoveCount + moveCount;
 
-    // Eval note
-    if (moves[plyID - 1]) {
-      if (!(plyID - 1 in notes)) {
-        notes[plyID - 1] = [];
-      }
-      notes[plyID - 1].push(formatEvalNote(move.uciInfo, 1 + (plyID % 2)));
+  // Save analysis for completed moves (only those not already saved)
+  gameState.moves.forEach((move, i) => {
+    const plyID = i + openingMoveCount - 1;
+
+    // Skip if already saved
+    if (savedNotePlies.has(plyID)) {
+      return;
     }
 
-    // PV note
-    if (!(plyID in notes)) {
-      notes[plyID] = [];
-    }
-    notes[plyID].push(formatPVNote(move.uciInfo));
+    // In standard Tak, white always moves first: ply 0,2,4...=white (turn=1), ply 1,3,5...=black (turn=2)
+    const ply = i + openingMoveCount;
+    const turn = ply % 2 === 0 ? 1 : 2;
+    const name =
+      turn === 1
+        ? formatName(gameState.whitePlayer)
+        : formatName(gameState.blackPlayer);
+
+    notes[plyID] = [formatEngineNote(move.uciInfo, turn, name)];
+    savedNotePlies.add(plyID);
   });
+
+  // Send finalized notes
   if (Object.keys(notes).length) {
     sendToNinja("ADD_NOTES", notes);
   }
@@ -465,9 +537,8 @@ window.addEventListener(
 
         // Update vertical line
         updateChartVerticalLine(
-          ninjaGameState.isAtEndOfMainBranch
-            ? null
-            : ninjaGameState.boardPly?.id
+          ninjaGameState.isAtEndOfMainBranch ? null : ninjaGameState.plyID,
+          ninjaGameState.plyIsDone,
         );
         break;
       case "GET_THEME":
@@ -507,5 +578,5 @@ window.addEventListener(
         break;
     }
   },
-  false
+  false,
 );
