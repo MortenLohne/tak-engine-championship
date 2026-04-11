@@ -25,6 +25,7 @@ const ninjaSettingsToSave = [
   "axisLabels",
   "axisLabelsSmall",
   "boardEvalBar",
+  "showAnalysisBoard",
   "showEval",
   "showMove",
   "showPTN",
@@ -32,6 +33,13 @@ const ninjaSettingsToSave = [
   "stackCounts",
   "themeID",
 ];
+const defaultNinjaSettings = {
+  boardEvalBar: true,
+  showAnalysisBoard: true,
+  showEval: true,
+  showToolbarAnalysis: true,
+  showMove: false,
+};
 const ninjaSettingsStorageKey = "ninjaSettings";
 let ninjaSettings = localStorage.getItem(ninjaSettingsStorageKey);
 if (ninjaSettings) {
@@ -94,14 +102,16 @@ const verticalLinePlugin = {
 
   renderVerticalLine(chartInstance, pointIndex) {
     const lineLeftOffset = this.getLinePosition(chartInstance, pointIndex);
-    if (lineLeftOffset === null) {
+    if (lineLeftOffset === null || lineLeftOffset === undefined) {
       return;
     }
     const scale = chartInstance.scales.y;
     const context = chartInstance.ctx;
     // render vertical line
     context.beginPath();
-    context.strokeStyle = theme.colors.primary;
+    const themeColors = theme && theme.colors ? theme.colors : null;
+    context.strokeStyle =
+      (themeColors && themeColors.primary) || Chart.defaults.color;
     context.moveTo(lineLeftOffset, scale.top);
     context.lineTo(lineLeftOffset, scale.bottom);
     context.stroke();
@@ -157,16 +167,14 @@ const chart = new Chart(document.getElementById("chart"), {
       x: {
         ticks: {
           color: () => {
-            return theme
-              ? theme.secondaryDark
-                ? theme.colors.textLight
-                : theme.colors.textDark
-              : "";
+            return theme?.secondaryDark
+              ? theme?.colors?.textLight || Chart.defaults.color
+              : theme?.colors?.textDark || Chart.defaults.color;
           },
         },
         grid: {
           color: () => {
-            return theme?.colors.bg;
+            return theme?.colors?.bg || Chart.defaults.borderColor;
           },
         },
       },
@@ -175,16 +183,14 @@ const chart = new Chart(document.getElementById("chart"), {
         suggestedMax: chartSettings.fixYAxis ? 100 : 10,
         ticks: {
           color: () => {
-            return theme
-              ? theme.secondaryDark
-                ? theme.colors.textLight
-                : theme.colors.textDark
-              : "";
+            return theme?.secondaryDark
+              ? theme?.colors?.textLight || Chart.defaults.color
+              : theme?.colors?.textDark || Chart.defaults.color;
           },
         },
         grid: {
           color: () => {
-            return theme?.colors.bg;
+            return theme?.colors?.bg || Chart.defaults.borderColor;
           },
         },
       },
@@ -192,12 +198,12 @@ const chart = new Chart(document.getElementById("chart"), {
   },
 });
 
-const player1LineColor = () => theme?.colors.player1 || "white";
-const player2LineColor = () => theme?.colors.player2 || "black";
+const player1LineColor = () => theme?.colors?.player1 || "white";
+const player2LineColor = () => theme?.colors?.player2 || "black";
 const player1FillColor = () =>
-  theme?.colors.player1clear.replace(/00$/, "33") || "white";
+  (theme?.colors?.player1clear || "white").replace(/00$/, "33");
 const player2FillColor = () =>
-  theme?.colors.player2clear.replace(/00$/, "33") || "black";
+  (theme?.colors?.player2clear || "black").replace(/00$/, "33");
 
 //#region Chart sync
 
@@ -276,15 +282,16 @@ function updateChartVerticalLine(plyID = null, plyIsDone = true) {
 
 function updateTheme(newTheme) {
   theme = newTheme;
+  const themeColors = theme?.colors || {};
 
   const textColor = theme
     ? theme.secondaryDark
-      ? theme.colors.textLight
-      : theme.colors.textDark
+      ? themeColors.textLight
+      : themeColors.textDark
     : "";
 
-  document.body.style.background = theme.colors.bg;
-  chartContainer.style.background = theme.colors.panel;
+  document.body.style.background = themeColors.bg || "";
+  chartContainer.style.background = themeColors.panel || "";
   Chart.defaults.color = textColor;
   chart.update();
 }
@@ -292,10 +299,123 @@ function updateTheme(newTheme) {
 //#region Formatting helpers
 
 function formatName(name) {
-  return name.replace(/^(.*[\/\\])/g, "");
+  if (typeof name !== "string") {
+    return "";
+  }
+  return name.trim();
 }
 
-function formatAnalysis(uciInfo, currentPlayer, tps = null, botName = null) {
+function toPvArray(pv) {
+  if (typeof pv === "string") {
+    return pv.trim() ? pv.trim().split(/\s+/) : [];
+  }
+  if (!Array.isArray(pv)) {
+    return [];
+  }
+  return pv
+    .flatMap((token) => {
+      if (typeof token !== "string") {
+        return [];
+      }
+      return token.trim() ? token.trim().split(/\s+/) : [];
+    })
+    .filter(Boolean);
+}
+
+function formatWdl(wdl, currentPlayer) {
+  if (!wdl) {
+    return null;
+  }
+
+  if (Array.isArray(wdl)) {
+    const [win, draw, loss] = wdl.map((value) => Number(value));
+    if ([win, draw, loss].some(Number.isNaN)) {
+      return null;
+    }
+    return currentPlayer === 2
+      ? { player1: loss, draw, player2: win }
+      : { player1: win, draw, player2: loss };
+  }
+
+  if (typeof wdl === "object") {
+    if (
+      "player1" in wdl &&
+      "draw" in wdl &&
+      "player2" in wdl &&
+      ![wdl.player1, wdl.draw, wdl.player2].some((value) =>
+        Number.isNaN(Number(value)),
+      )
+    ) {
+      return {
+        player1: Number(wdl.player1),
+        draw: Number(wdl.draw),
+        player2: Number(wdl.player2),
+      };
+    }
+
+    if (
+      "win" in wdl &&
+      "draw" in wdl &&
+      "loss" in wdl &&
+      ![wdl.win, wdl.draw, wdl.loss].some((value) =>
+        Number.isNaN(Number(value)),
+      )
+    ) {
+      const win = Number(wdl.win);
+      const draw = Number(wdl.draw);
+      const loss = Number(wdl.loss);
+      return currentPlayer === 2
+        ? { player1: loss, draw, player2: win }
+        : { player1: win, draw, player2: loss };
+    }
+  }
+
+  return null;
+}
+
+function extractRawSuggestions(uciInfo) {
+  if (!uciInfo) {
+    return [];
+  }
+
+  if (Array.isArray(uciInfo.suggestions) && uciInfo.suggestions.length) {
+    return uciInfo.suggestions;
+  }
+
+  if (Array.isArray(uciInfo.multiPv) && uciInfo.multiPv.length) {
+    return uciInfo.multiPv;
+  }
+
+  if (Array.isArray(uciInfo.multipv) && uciInfo.multipv.length) {
+    return uciInfo.multipv;
+  }
+
+  if (Array.isArray(uciInfo.pvs) && uciInfo.pvs.length) {
+    return uciInfo.pvs.map((pv) =>
+      typeof pv === "object" && pv !== null ? pv : { pv },
+    );
+  }
+
+  if (
+    Array.isArray(uciInfo.pv) &&
+    uciInfo.pv.length > 0 &&
+    uciInfo.pv.some((pv) => typeof pv === "string" && /\s/.test(pv))
+  ) {
+    return uciInfo.pv.map((pv) => ({ pv }));
+  }
+
+  if (
+    Array.isArray(uciInfo.pv) &&
+    uciInfo.pv.length > 0 &&
+    Array.isArray(uciInfo.pv[0])
+  ) {
+    return uciInfo.pv.map((pv) => ({ pv }));
+  }
+
+  return [uciInfo];
+}
+
+function formatSuggestion(uciInfo, currentPlayer, botName = null) {
   const { depth, hashfull, nodes, nps, pv, seldepth, time } = uciInfo;
 
   let evaluation = winningProbability(uciInfo);
@@ -305,26 +425,46 @@ function formatAnalysis(uciInfo, currentPlayer, tps = null, botName = null) {
   }
 
   return {
-    tps,
     evaluation,
+    wdl: formatWdl(uciInfo?.wdl, currentPlayer),
     depth,
     hashfull,
     nodes,
     nps,
-    pv,
+    pv: toPvArray(pv),
     seldepth,
     time,
     botName,
   };
 }
 
-function formatEngineNote(uciInfo, turn, name) {
-  let { evaluation, depth, nodes, nps, pv, time } = formatAnalysis(
-    uciInfo,
-    turn,
-    null,
-    name,
-  );
+function formatAnalysis(uciInfo, currentPlayer, tps = null, botName = null) {
+  const suggestions = extractRawSuggestions(uciInfo)
+    .map((suggestion) => formatSuggestion(suggestion, currentPlayer, botName))
+    .filter((suggestion) => suggestion.pv.length > 0);
+
+  const primarySuggestion =
+    suggestions[0] || formatSuggestion(uciInfo, currentPlayer, botName);
+
+  return {
+    tps,
+    ...primarySuggestion,
+    suggestions,
+  };
+}
+
+function formatEval(uciInfo, currentPlayer) {
+  if (!uciInfo) {
+    return null;
+  }
+  const evaluation =
+    winningProbability(uciInfo) * (currentPlayer === 1 ? 1 : -1);
+  const wdl = formatWdl(uciInfo.wdl, currentPlayer);
+  return wdl ? { evaluation, wdl } : evaluation;
+}
+
+function formatEngineNote(suggestion, name) {
+  let { evaluation, depth, nodes, nps, pv, time } = suggestion;
   evaluation = Math.round(10 * evaluation) / 1000;
   if (evaluation >= 0) {
     evaluation = `+${evaluation}`;
@@ -334,16 +474,72 @@ function formatEngineNote(uciInfo, turn, name) {
   }
 
   // Format with new PTN Ninja syntax: name:"engine" eval depth nodes time pv
-  return `name:"${name.replace(/"/g, "")}" ${evaluation}${depth || ""} ${nodes} nodes ${time}ms ${nps}nps pv> ${pv.join(" ")}`;
+  return `name:"${name.replace(/"/g, "")}" ${evaluation}${depth || ""} ${nodes || 0} nodes ${time || 0}ms ${nps || 0}nps pv> ${(pv || []).join(" ")}`;
+}
+
+function formatEngineNotes(uciInfo, turn, name) {
+  const { suggestions } = formatAnalysis(uciInfo, turn, null, name);
+  if (!suggestions.length) {
+    return [formatEngineNote(formatSuggestion(uciInfo, turn, name), name)];
+  }
+  return suggestions.map((suggestion) => formatEngineNote(suggestion, name));
 }
 
 // Extract winning probability, as a number between -100 and 100
 function winningProbability(uciInfo) {
-  if (uciInfo?.wdl) {
-    return uciInfo.wdl[0] / 5 + uciInfo.wdl[1] / 10 - 100;
-  } else {
-    return uciInfo?.cpScore || 0;
+  if (!uciInfo) {
+    return 0;
   }
+
+  const evaluation = Number(uciInfo.evaluation);
+  if (Number.isFinite(evaluation)) {
+    return evaluation;
+  }
+
+  if (Array.isArray(uciInfo.wdl)) {
+    const [win, draw] = uciInfo.wdl.map((value) => Number(value));
+    if (Number.isFinite(win) && Number.isFinite(draw)) {
+      return win / 5 + draw / 10 - 100;
+    }
+  }
+
+  if (
+    uciInfo.wdl &&
+    typeof uciInfo.wdl === "object" &&
+    "win" in uciInfo.wdl &&
+    "draw" in uciInfo.wdl
+  ) {
+    const win = Number(uciInfo.wdl.win);
+    const draw = Number(uciInfo.wdl.draw);
+    if (Number.isFinite(win) && Number.isFinite(draw)) {
+      return win / 5 + draw / 10 - 100;
+    }
+  }
+
+  if (
+    uciInfo.wdl &&
+    typeof uciInfo.wdl === "object" &&
+    "player1" in uciInfo.wdl &&
+    "draw" in uciInfo.wdl
+  ) {
+    const win = Number(uciInfo.wdl.player1);
+    const draw = Number(uciInfo.wdl.draw);
+    if (Number.isFinite(win) && Number.isFinite(draw)) {
+      return win / 5 + draw / 10 - 100;
+    }
+  }
+
+  const cpScore = Number(uciInfo.cpScore);
+  if (Number.isFinite(cpScore)) {
+    return cpScore;
+  }
+
+  const rawCp = Number(uciInfo.rawCp);
+  if (Number.isFinite(rawCp)) {
+    return rawCp;
+  }
+
+  return 0;
 }
 
 //#region Server sync
@@ -428,22 +624,16 @@ function setCurrentAnalysis() {
 
   if (ninjaGameState.isAtEndOfMainBranch && gameState.currentMoveUciInfo) {
     // At the end of the game - show real-time analysis
+    const turn = ninjaGameState.turn;
+    const botName =
+      turn === 1
+        ? formatName(gameState.whitePlayer)
+        : formatName(gameState.blackPlayer);
     sendToNinja(
       "SET_ANALYSIS",
-      formatAnalysis(
-        gameState.currentMoveUciInfo,
-        ninjaGameState.turn,
-        null,
-        ninjaGameState.turn === 1
-          ? formatName(gameState.whitePlayer)
-          : formatName(gameState.blackPlayer),
-      ),
+      formatAnalysis(gameState.currentMoveUciInfo, turn, null, botName),
     );
-    sendToNinja(
-      "SET_EVAL",
-      winningProbability(gameState.currentMoveUciInfo) *
-        (ninjaGameState.turn === 1 ? 1 : -1),
-    );
+    sendToNinja("SET_EVAL", formatEval(gameState.currentMoveUciInfo, turn));
   } else {
     // Historical position - show saved analysis from moves
     const openingMoveCount = gameState.openingMoves.length;
@@ -457,21 +647,20 @@ function setCurrentAnalysis() {
       const move = gameState.moves[moveIndex];
       if (move && move.uciInfo) {
         const turn = ninjaGameState.turn;
+        const botName =
+          turn === 1
+            ? formatName(gameState.whitePlayer)
+            : formatName(gameState.blackPlayer);
         sendToNinja(
           "SET_ANALYSIS",
-          formatAnalysis(
-            move.uciInfo,
-            turn,
-            null,
-            turn === 1
-              ? formatName(gameState.whitePlayer)
-              : formatName(gameState.blackPlayer),
-          ),
+          formatAnalysis(move.uciInfo, turn, null, botName),
         );
+        sendToNinja("SET_EVAL", formatEval(move.uciInfo, turn));
       }
     } else {
       // Clear analysis if no data for this position
       sendToNinja("SET_ANALYSIS", null);
+      sendToNinja("SET_EVAL", null);
     }
   }
 }
@@ -497,7 +686,7 @@ function saveAnalysisToNotes() {
         ? formatName(gameState.whitePlayer)
         : formatName(gameState.blackPlayer);
 
-    notes[plyID] = [formatEngineNote(move.uciInfo, turn, name)];
+    notes[plyID] = formatEngineNotes(move.uciInfo, turn, name);
     savedNotePlies.add(plyID);
   });
 
@@ -522,11 +711,24 @@ window.addEventListener(
           // Initiate connection to server
           fetchLoop();
 
-          if (ninjaSettings) {
-            // Restore previous settings
-            sendToNinja("SET_UI", ninjaSettings);
+          const mergedNinjaSettings = {
+            ...(ninjaSettings || {}),
+            ...defaultNinjaSettings,
+          };
+          sendToNinja("SET_UI", mergedNinjaSettings);
+          if (
+            !ninjaSettings ||
+            Object.keys(defaultNinjaSettings).some(
+              (key) => ninjaSettings[key] !== mergedNinjaSettings[key],
+            )
+          ) {
+            ninjaSettings = mergedNinjaSettings;
+            localStorage.setItem(
+              ninjaSettingsStorageKey,
+              JSON.stringify(ninjaSettings),
+            );
           }
-          if (!ninjaSettings || !("themeID" in ninjaSettings)) {
+          if (!("themeID" in mergedNinjaSettings)) {
             // Request theme info
             sendToNinja("GET_THEME");
           }
