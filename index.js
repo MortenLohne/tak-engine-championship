@@ -296,6 +296,41 @@ function updateTheme(newTheme) {
   chart.update();
 }
 
+//#region Clock sync
+
+// Convert a serde-serialized std::time::Duration ({ secs, nanos }) to ms
+function durationToMs(duration) {
+  if (!duration || typeof duration !== "object") {
+    return null;
+  }
+  const secs = Number(duration.secs);
+  const nanos = Number(duration.nanos);
+  if (!Number.isFinite(secs) || !Number.isFinite(nanos)) {
+    return null;
+  }
+  return secs * 1000 + Math.round(nanos / 1e6);
+}
+
+function sendClocks(isLive) {
+  if (!gameState) {
+    return;
+  }
+  const time1 = durationToMs(gameState.whiteTimeLeft);
+  const time2 = durationToMs(gameState.blackTimeLeft);
+  if (time1 === null || time2 === null) {
+    return;
+  }
+  const ply = gameState.openingMoves.length + gameState.moves.length;
+  const timerTurn = ply % 2 === 0 ? 1 : 2;
+  sendToNinja("SET_GAME_TIME", {
+    time1,
+    time2,
+    timerTurn,
+    lastTimeUpdateWall: Date.now(),
+  });
+  sendToNinja("SET_TIMER_LIVE", Boolean(isLive));
+}
+
 //#region Formatting helpers
 
 function formatName(name) {
@@ -567,6 +602,7 @@ async function fetchLoop() {
       "Lost connection to the server, reconnecting...";
     console.error("Connection error: ", error);
     gameState = null;
+    sendToNinja("SET_TIMER_LIVE", false);
     evtSource.close();
     window.setTimeout(fetchLoop, 2000);
   };
@@ -598,6 +634,7 @@ function updateGameState() {
     sendToNinja("SET_CURRENT_PTN", ptn);
     sendToNinja("LAST");
     saveAnalysisToNotes();
+    sendClocks(true);
     moveCount = gameState.moves.length;
   } else if (moveCount < gameState.moves.length) {
     // New move(s)
@@ -605,6 +642,7 @@ function updateGameState() {
       sendToNinja("APPEND_PLY", move.move);
     });
     saveAnalysisToNotes();
+    sendClocks(true);
     moveCount = gameState.moves.length;
   } else {
     // New analysis
@@ -754,6 +792,7 @@ window.addEventListener(
           roundNumber,
           result: value.result,
         };
+        sendToNinja("SET_TIMER_LIVE", false);
         sendToNinja("GET_URL");
         break;
       case "GET_URL":
