@@ -29,6 +29,7 @@ const ninjaSettingsToSave = [
   "showEval",
   "showMove",
   "showPTN",
+  "showRoads",
   "showToolbarAnalysis",
   "stackCounts",
   "themeID",
@@ -749,9 +750,11 @@ window.addEventListener(
           // Initiate connection to server
           fetchLoop();
 
+          // Defaults first, then saved settings override them so that
+          // user-toggled prefs survive a reload.
           const mergedNinjaSettings = {
-            ...(ninjaSettings || {}),
             ...defaultNinjaSettings,
+            ...(ninjaSettings || {}),
           };
           sendToNinja("SET_UI", mergedNinjaSettings);
           if (
