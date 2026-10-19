@@ -215,22 +215,16 @@ function updateChart() {
   }
 
   let scores = gameState.moves.map((move, i) => {
-    const ply = i + gameState.openingMoves.length;
     return {
-      ply,
-      score: winningProbability(
-        withEngineWdl(move.uciInfo, engineNameForPly(ply)),
-      ),
+      ply: i + gameState.openingMoves.length,
+      score: winningProbability(move.uciInfo),
     };
   });
 
   if (gameState.currentMoveUciInfo) {
-    const ply = scores.length + gameState.openingMoves.length;
     scores.push({
-      ply,
-      score: winningProbability(
-        withEngineWdl(gameState.currentMoveUciInfo, engineNameForPly(ply)),
-      ),
+      ply: scores.length + gameState.openingMoves.length,
+      score: winningProbability(gameState.currentMoveUciInfo),
     });
   }
 
@@ -348,12 +342,6 @@ function formatName(name) {
   return name.trim();
 }
 
-function engineNameForPly(ply) {
-  return formatName(
-    ply % 2 === 0 ? gameState.whitePlayer : gameState.blackPlayer,
-  );
-}
-
 // Syntaks reports aspiration-window fail-high/low results with a truncated PV
 // (often just the root move), and Racetrack doesn't forward the bound flag.
 // While the reported PV is a prefix of the last complete one, keep the latter.
@@ -376,40 +364,6 @@ function trackLivePv() {
   }
   const ply = gameState.openingMoves.length + gameState.moves.length;
   livePv = { ply, pv: pvWithContinuation(uciInfo.pv, ply) };
-}
-
-// Engines whose cp scores can be mapped back onto their own WDL model, for when
-// Racetrack doesn't forward the engine's `wdl` token.
-// Syntaks prints cp = raw * 100 / a, and wdl from a logistic of the raw score.
-const WDL_MODELS = [{ engine: /^syntaks/i, a: 204.89, b: 139.97, win: 25000 }];
-
-function cpToWdl(cp, { a, b, win }) {
-  const raw = (cp * a) / 100;
-  if (Math.abs(raw) > win) {
-    return raw > 0 ? [1000, 0, 0] : [0, 0, 1000];
-  }
-  const p = (score) => Math.round(1000 / (1 + Math.exp((a - score) / b)));
-  const w = p(raw);
-  const l = p(-raw);
-  return [w, 1000 - w - l, l];
-}
-
-function withEngineWdl(uciInfo, engineName) {
-  if (!uciInfo || uciInfo.wdl) {
-    return uciInfo;
-  }
-  const model = WDL_MODELS.find(({ engine }) => engine.test(engineName));
-  const cp = Number(uciInfo.cpScore);
-  if (!model || !Number.isFinite(cp)) {
-    return uciInfo;
-  }
-  return {
-    ...uciInfo,
-    wdl: cpToWdl(cp, model),
-    ...(Array.isArray(uciInfo.suggestions) && {
-      suggestions: uciInfo.suggestions.map((s) => withEngineWdl(s, engineName)),
-    }),
-  };
 }
 
 function toPvArray(pv) {
@@ -743,10 +697,7 @@ function setCurrentAnalysis() {
       turn === 1
         ? formatName(gameState.whitePlayer)
         : formatName(gameState.blackPlayer);
-    const uciInfo = withEngineWdl(
-      { ...gameState.currentMoveUciInfo, pv: livePv.pv },
-      botName,
-    );
+    const uciInfo = { ...gameState.currentMoveUciInfo, pv: livePv.pv };
     sendToNinja("SET_ANALYSIS", formatAnalysis(uciInfo, turn, null, botName));
     sendToNinja("SET_EVAL", formatEval(uciInfo, turn));
   } else {
@@ -766,12 +717,11 @@ function setCurrentAnalysis() {
           turn === 1
             ? formatName(gameState.whitePlayer)
             : formatName(gameState.blackPlayer);
-        const uciInfo = withEngineWdl(move.uciInfo, botName);
         sendToNinja(
           "SET_ANALYSIS",
-          formatAnalysis(uciInfo, turn, null, botName),
+          formatAnalysis(move.uciInfo, turn, null, botName),
         );
-        sendToNinja("SET_EVAL", formatEval(uciInfo, turn));
+        sendToNinja("SET_EVAL", formatEval(move.uciInfo, turn));
       }
     } else {
       // Clear analysis if no data for this position
@@ -803,13 +753,10 @@ function saveAnalysisToNotes() {
         : formatName(gameState.blackPlayer);
 
     // The final info line may itself be a truncated bound result
-    const uciInfo = withEngineWdl(
-      move.uciInfo && {
-        ...move.uciInfo,
-        pv: pvWithContinuation(move.uciInfo.pv, ply),
-      },
-      name,
-    );
+    const uciInfo = move.uciInfo && {
+      ...move.uciInfo,
+      pv: pvWithContinuation(move.uciInfo.pv, ply),
+    };
     notes[plyID] = formatEngineNotes(uciInfo, turn, name);
     savedNotePlies.add(plyID);
   });
