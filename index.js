@@ -476,6 +476,36 @@ function extractRawSuggestions(uciInfo) {
   return [uciInfo];
 }
 
+// Moves to a forced result as reported by the engine (`score mate N`),
+// positive when the engine wins
+function mateScore(uciInfo) {
+  if (uciInfo?.mate === null || uciInfo?.mate === undefined) {
+    return null;
+  }
+  const mate = Number(uciInfo.mate);
+  return Number.isFinite(mate) ? mate : null;
+}
+
+// The engine's own score, from player 1's perspective like PTN Ninja's:
+// the reported cp, or "W<moves>" for mate scores. PTN Ninja places the label
+// on the winning side by the evaluation's sign, and UCI mate scores don't say
+// whether the win is by road or flats, so the label carries neither.
+function formatScore(uciInfo, currentPlayer) {
+  const sign = currentPlayer === 2 ? -1 : 1;
+  const mate = mateScore(uciInfo);
+  if (mate !== null) {
+    return {
+      rawCp: null,
+      scoreText: `W${Math.abs(mate)}`,
+    };
+  }
+  const cp = Number(uciInfo?.cpScore);
+  return {
+    rawCp: uciInfo?.cpScore != null && Number.isFinite(cp) ? cp * sign : null,
+    scoreText: null,
+  };
+}
+
 function formatSuggestion(uciInfo, currentPlayer, botName = null) {
   const { depth, hashfull, nodes, nps, pv, seldepth, time } = uciInfo;
 
@@ -488,6 +518,7 @@ function formatSuggestion(uciInfo, currentPlayer, botName = null) {
   return {
     evaluation,
     wdl: formatWdl(uciInfo?.wdl, currentPlayer),
+    ...formatScore(uciInfo, currentPlayer),
     depth,
     hashfull,
     nodes,
@@ -525,7 +556,8 @@ function formatEval(uciInfo, currentPlayer) {
 }
 
 function formatEngineNote(suggestion, name) {
-  let { evaluation, depth, nodes, nps, pv, time } = suggestion;
+  let { evaluation, wdl, rawCp, scoreText, depth, nodes, nps, pv, time } =
+    suggestion;
   evaluation = Math.round(10 * evaluation) / 1000;
   if (evaluation >= 0) {
     evaluation = `+${evaluation}`;
@@ -534,8 +566,17 @@ function formatEngineNote(suggestion, name) {
     depth = `/${depth}`;
   }
 
-  // Format with new PTN Ninja syntax: name:"engine" eval depth nodes time pv
-  return `name:"${name.replace(/"/g, "")}" ${evaluation}${depth || ""} ${nodes || 0} nodes ${time || 0}ms ${nps || 0}nps pv> ${(pv || []).join(" ")}`;
+  // Format with new PTN Ninja syntax:
+  // name:"engine" wdl:p1,d,p2 cp:N score:WN eval/depth nodes time pv
+  const scores = [
+    wdl && `wdl:${wdl.player1},${wdl.draw},${wdl.player2}`,
+    rawCp !== null && rawCp !== undefined && `cp:${rawCp}`,
+    scoreText && `score:${scoreText}`,
+  ]
+    .filter(Boolean)
+    .map((token) => `${token} `)
+    .join("");
+  return `name:"${name.replace(/"/g, "")}" ${scores}${evaluation}${depth || ""} ${nodes || 0} nodes ${time || 0}ms ${nps || 0}nps pv> ${(pv || []).join(" ")}`;
 }
 
 function formatEngineNotes(uciInfo, turn, name) {
@@ -555,6 +596,11 @@ function winningProbability(uciInfo) {
   const evaluation = Number(uciInfo.evaluation);
   if (Number.isFinite(evaluation)) {
     return evaluation;
+  }
+
+  const mate = mateScore(uciInfo);
+  if (mate !== null) {
+    return mate < 0 ? -100 : 100;
   }
 
   if (Array.isArray(uciInfo.wdl)) {
