@@ -1088,27 +1088,14 @@ function sendGameEndedNotification({ round, result }, url) {
   });
 }
 
-// `fromNotification`: the viewing notification's own "Back to live" button was
-// clicked, which already closed it
-function showLiveGame({ fromNotification = false } = {}) {
+function showLiveGame() {
   finishedGameRequest++; // Drop any finished game still loading
   const wasViewing = viewedGame !== null;
   viewedGame = null;
   if (!wasViewing) {
     return;
   }
-  if (!fromNotification) {
-    // Production PTN Ninja doesn't support DISMISS_NOTIFY yet, so first
-    // replace the viewing notification (same group and position) with one
-    // that closes itself almost at once. Builds that do support it then find
-    // nothing left to dismiss.
-    sendToNinja("NOTIFY", {
-      group: viewingNotificationId,
-      message: "Back to live",
-      position: "top-right",
-      timeout: 1,
-    });
-  }
+  // A no-op if its own "Back to live" button already closed it
   sendToNinja("DISMISS_NOTIFY", { id: viewingNotificationId });
   // Reload the live game from scratch on the next update
   roundNumber = 0;
@@ -1292,7 +1279,7 @@ window.addEventListener(
         break;
       }
       case "BACK_TO_LIVE":
-        showLiveGame({ fromNotification: true });
+        showLiveGame();
         break;
       case "VIEW_FINISHED_GAME":
         window.open(value, "_blank");
