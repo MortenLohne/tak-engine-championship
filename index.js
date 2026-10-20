@@ -2,7 +2,7 @@ import { applyPatch } from "https://esm.sh/fast-json-patch@3.1.1";
 import Chart from "https://esm.sh/chart.js@4.5.0/auto";
 import {
   buildResultsModel,
-  centipawns,
+  centipieces,
   durationMs,
   findResult,
   isMatchOver,
@@ -136,7 +136,7 @@ if (chartSettings) {
   };
 }
 // "winrate" (the default) or "cp"
-const isCentipawnMode = () => chartSettings.evalMode === "cp";
+const isCentipieceMode = () => chartSettings.evalMode === "cp";
 
 function setChartSettings(key, value) {
   chartSettings[key] = value;
@@ -146,10 +146,10 @@ function setChartSettings(key, value) {
   updateEvalModeToggle();
 }
 
-// Centipawn axis ticks at round values, placed on the symlog scale
+// Centipiece axis ticks at round values, placed on the symlog scale
 const CP_TICKS = [100, 300, 1000, 3000, 10000];
 
-function formatCentipawns(cp) {
+function formatCentipieces(cp) {
   if (Math.abs(cp) >= MATE_CP) {
     return cp > 0 ? "+Mate" : "−Mate";
   }
@@ -160,7 +160,7 @@ function formatCentipawns(cp) {
 function applyYAxis() {
   const y = chart.config.options.scales.y;
   const tooltip = chart.config.options.plugins.tooltip;
-  if (isCentipawnMode()) {
+  if (isCentipieceMode()) {
     const limit = symlog(chartSettings.fixYAxis ? MATE_CP : 300);
     y.suggestedMin = -limit;
     y.suggestedMax = limit;
@@ -172,15 +172,10 @@ function applyYAxis() {
         .sort((a, b) => a - b);
       scale.ticks = values.map((value) => ({ value }));
     };
-    y.ticks.callback = (value) => formatCentipawns(symlogInverse(value));
-    y.title = {
-      display: false, // Set by evalModeLayoutPlugin from the chart's height
-      text: "Centipawns (each engine's own scale)",
-      color: y.ticks.color,
-    };
+    y.ticks.callback = (value) => formatCentipieces(symlogInverse(value));
     tooltip.callbacks = {
       label: (context) =>
-        `${context.dataset.label}: ${formatCentipawns(
+        `${context.dataset.label}: ${formatCentipieces(
           symlogInverse(context.parsed.y),
         )}`,
     };
@@ -190,7 +185,6 @@ function applyYAxis() {
     y.suggestedMax = scale;
     delete y.afterBuildTicks;
     delete y.ticks.callback;
-    y.title = { display: false };
     tooltip.callbacks = {};
   }
   chart.update();
@@ -198,8 +192,8 @@ function applyYAxis() {
 
 // The value plotted for one engine report, from that engine's point of view
 function plottedEvaluation(uciInfo) {
-  if (isCentipawnMode()) {
-    const cp = centipawns(uciInfo);
+  if (isCentipieceMode()) {
+    const cp = centipieces(uciInfo);
     return cp === null ? null : symlog(cp);
   }
   return winningProbability(uciInfo);
@@ -240,8 +234,7 @@ const verticalLinePlugin = {
   },
 };
 
-// Keeps the legend clear of the Win % / cp toggle in the top-right corner,
-// and drops the centipawn axis title where the chart is too short for it
+// Keeps the legend clear of the Win % / cp toggle in the top-right corner
 const evalModeLayoutPlugin = {
   id: "evalModeLayout",
   afterLayout(chart) {
@@ -258,12 +251,6 @@ const evalModeLayoutPlugin = {
         chart.options.layout.padding = { top };
         changed = true;
       }
-    }
-    const title = chart.options.scales.y.title;
-    const showTitle = isCentipawnMode() && chart.height >= 260;
-    if (Boolean(title?.display) !== showTitle) {
-      title.display = showTitle;
-      changed = true;
     }
     if (changed) {
       // Re-run layout with the new padding once this one has finished
@@ -416,7 +403,7 @@ function updateChart() {
 const evalModeToggle = document.getElementById("eval-mode");
 
 function updateEvalModeToggle() {
-  const mode = isCentipawnMode() ? "cp" : "winrate";
+  const mode = isCentipieceMode() ? "cp" : "winrate";
   evalModeToggle.querySelectorAll("button").forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
   });

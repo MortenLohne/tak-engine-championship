@@ -52,12 +52,12 @@ export function ptnResult(result) {
   return r && r !== "*" ? r : null;
 }
 
-// Mate scores have no centipawn value comparable to the engine's others, so
-// the centipawn graph pins them (and anything beyond) to this cap
+// Mate scores have no centipiece value comparable to the engine's others, so
+// the centipiece graph pins them (and anything beyond) to this cap
 export const MATE_CP = 20000;
 
-// The engine's reported centipawn score, from its own point of view
-export function centipawns(uciInfo) {
+// The engine's reported centipiece score, from its own point of view
+export function centipieces(uciInfo) {
   if (!uciInfo) return null;
   if (uciInfo.mate != null && Number.isFinite(Number(uciInfo.mate))) {
     return Number(uciInfo.mate) < 0 ? -MATE_CP : MATE_CP;
@@ -67,7 +67,7 @@ export function centipawns(uciInfo) {
   return Math.max(-MATE_CP, Math.min(MATE_CP, cp));
 }
 
-// A symmetric log scale for centipawns: linear-ish near zero, compressed
+// A symmetric log scale for centipieces: linear-ish near zero, compressed
 // for large advantages, and defined for negative values
 export function symlog(cp) {
   return Math.sign(cp) * Math.log10(1 + Math.abs(cp) / 100);

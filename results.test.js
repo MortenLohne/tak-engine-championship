@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   MATE_CP,
   buildResultsModel,
-  centipawns,
+  centipieces,
   clockNote,
   symlog,
   symlogInverse,
@@ -300,16 +300,16 @@ test("isMatchOver once every scheduled game has a result", () => {
   assert.equal(isMatchOver({}), false);
 });
 
-test("centipawns from the engine's report", () => {
-  assert.equal(centipawns({ cpScore: 37 }), 37);
-  assert.equal(centipawns({ cpScore: -120, wdl: [1, 2, 997] }), -120);
+test("centipieces from the engine's report", () => {
+  assert.equal(centipieces({ cpScore: 37 }), 37);
+  assert.equal(centipieces({ cpScore: -120, wdl: [1, 2, 997] }), -120);
   // Mate scores have no comparable cp value: pinned to the cap
-  assert.equal(centipawns({ mate: 3 }), MATE_CP);
-  assert.equal(centipawns({ mate: -2, cpScore: -100 }), -MATE_CP);
+  assert.equal(centipieces({ mate: 3 }), MATE_CP);
+  assert.equal(centipieces({ mate: -2, cpScore: -100 }), -MATE_CP);
   // Absurd values are clamped to the cap
-  assert.equal(centipawns({ cpScore: 999999 }), MATE_CP);
-  assert.equal(centipawns({}), null);
-  assert.equal(centipawns(null), null);
+  assert.equal(centipieces({ cpScore: 999999 }), MATE_CP);
+  assert.equal(centipieces({}), null);
+  assert.equal(centipieces(null), null);
 });
 
 test("symlog is odd, monotonic, and inverted by symlogInverse", () => {
