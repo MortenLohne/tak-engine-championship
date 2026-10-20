@@ -64,18 +64,17 @@ function reorder(parent, elements) {
 
 export function createResultsPanel(root, { onSelect }) {
   root.innerHTML = `
+    <div class="results-header">
+      <div class="results-score">
+        <span class="results-side"><span class="results-name"></span><b class="results-wins results-count"></b></span>
+        <span class="results-draws"><b class="results-count"></b> <span class="results-draws-word"></span></span>
+        <span class="results-side"><b class="results-wins results-count"></b><span class="results-name"></span></span>
+      </div>
+    </div>
     <div class="results-strip" role="button" tabindex="0" aria-controls="results-games" aria-expanded="false">
-      <div class="results-body">
-        <div class="results-score">
-          <span class="results-side"><span class="results-name"></span><b class="results-wins results-count"></b></span>
-          <span class="results-draws">· <b class="results-count"></b> <span class="results-draws-word"></span> ·</span>
-          <span class="results-side"><b class="results-wins results-count"></b><span class="results-name"></span></span>
-        </div>
-        <div class="results-separator"></div>
-        <div class="results-row">
-          <div class="results-dots"></div>
-          <span class="results-label"></span>
-        </div>
+      <div class="results-row">
+        <div class="results-dots"></div>
+        <span class="results-label"></span>
       </div>
       <svg class="results-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="${CARET_PATH}" /></svg>
     </div>
@@ -99,6 +98,7 @@ export function createResultsPanel(root, { onSelect }) {
     </div>
   `;
 
+  const header = root.querySelector(".results-header");
   const strip = root.querySelector(".results-strip");
   const score = root.querySelector(".results-score");
   const [nameA, nameB] = root.querySelectorAll(".results-name");
@@ -218,14 +218,17 @@ export function createResultsPanel(root, { onSelect }) {
     }
   }).observe(dots);
 
-  // Lets the list's max-height leave room for the graph below the strip
+  // Lets the list's max-height leave room for the graph below the header
+  // and strip
   function measureStrip() {
-    const height = `${strip.offsetHeight}px`;
+    const height = `${header.offsetHeight + strip.offsetHeight}px`;
     if (root.style.getPropertyValue("--results-strip-height") !== height) {
       root.style.setProperty("--results-strip-height", height);
     }
   }
-  new ResizeObserver(measureStrip).observe(strip);
+  const stripObserver = new ResizeObserver(measureStrip);
+  stripObserver.observe(header);
+  stripObserver.observe(strip);
   // The panel's width changes whenever the layout switches
   new ResizeObserver(() => {
     const nowWide = isWide();

@@ -6,6 +6,7 @@ import {
   fullMoves,
   isNewMatch,
   matchInfo,
+  ptnClock,
   ptnResult,
   resultWinner,
 } from "./results.js";
@@ -226,4 +227,59 @@ test("findResult and ptnResult", () => {
   for (const r of ["R-0", "0-F", "1-0", "1/2-1/2"])
     assert.equal(ptnResult(r), r);
   for (const r of ["*", "", null, undefined]) assert.equal(ptnResult(r), null);
+});
+
+test("ptnClock", () => {
+  const tc = (time, increment, black = { time, increment }) => ({
+    whiteTime: time,
+    whiteIncrement: increment,
+    blackTime: black.time,
+    blackIncrement: black.increment,
+  });
+  assert.equal(
+    ptnClock(tc({ secs: 600, nanos: 0 }, { secs: 5, nanos: 0 })),
+    "10:00 +5",
+  );
+  assert.equal(ptnClock(tc({ secs: 10 }, { nanos: 100000000 })), "0:10 +0.1");
+  assert.equal(ptnClock(tc({ secs: 3600 }, { secs: 0 })), "60:00 +0");
+  assert.equal(ptnClock(tc({ secs: 65 }, { secs: 2 })), "1:05 +2");
+  assert.equal(
+    ptnClock(tc({ secs: 10, nanos: 500000000 }, { secs: 0, nanos: 250000000 })),
+    "0:10.5 +0.25",
+  );
+  assert.equal(
+    ptnClock(tc({ secs: 59, nanos: 999999999 }, { secs: 1 })),
+    "1:00 +1",
+  );
+  // Absent (older Racetrack), partial, invalid or zero
+  assert.equal(ptnClock({}), null);
+  assert.equal(ptnClock(null), null);
+  assert.equal(
+    ptnClock({ whiteTime: { secs: 600 }, whiteIncrement: { secs: 5 } }),
+    null,
+  );
+  assert.equal(ptnClock(tc({}, { secs: 5 })), null);
+  assert.equal(ptnClock(tc({ secs: "x" }, { secs: 5 })), null);
+  assert.equal(ptnClock(tc({ secs: 0 }, { secs: 5 })), null);
+  // Different time controls
+  assert.equal(
+    ptnClock(
+      tc(
+        { secs: 600 },
+        { secs: 5 },
+        { time: { secs: 300 }, increment: { secs: 5 } },
+      ),
+    ),
+    null,
+  );
+  assert.equal(
+    ptnClock(
+      tc(
+        { secs: 600 },
+        { secs: 5 },
+        { time: { secs: 600 }, increment: { secs: 3 } },
+      ),
+    ),
+    null,
+  );
 });

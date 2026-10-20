@@ -5,6 +5,7 @@ import {
   findResult,
   isNewMatch,
   matchInfo,
+  ptnClock,
   ptnResult,
 } from "./results.js";
 import { createResultsPanel } from "./results-panel.js";
@@ -37,7 +38,12 @@ let reconnected = false; // Whether the stream reconnected since the last state
 let finishedGameRequest = 0; // Latest showFinishedGame call, to drop stale loads
 let roundNumber = 0;
 let moveCount = 0;
-let previousGame = null;
+let previousGame = null; // The game whose "ended" notification is pending
+let appendedRound = 0; // Round of the last ply appended to PTN Ninja
+let endNotifiedRound = null; // Round of the last "Game N ended" notification
+// A copy of the live state from before the round last changed: the game that
+// just ended, until Racetrack's record of it is loaded
+let previousLiveState = null;
 let savedNotePlies = new Set(); // Track plies with final notes saved
 
 let ninjaGameState = null;
@@ -324,6 +330,14 @@ function updateTheme(newTheme) {
       : themeColors.textDark
     : "";
 
+  // PTN Ninja's header and toolbars: the `ui` colour, with light text when
+  // it's dark (`isDark` is computed from `ui`)
+  const headerTextColor = theme
+    ? theme.isDark
+      ? themeColors.textLight
+      : themeColors.textDark
+    : "";
+
   document.body.style.background = themeColors.bg || "";
   document.getElementById("chart-wrapper").style.background =
     themeColors.panel || "";
@@ -331,6 +345,8 @@ function updateTheme(newTheme) {
     "--results-bg": themeColors.bg,
     "--results-panel": themeColors.panel,
     "--results-text": textColor,
+    "--results-header-bg": themeColors.ui,
+    "--results-header-text": headerTextColor,
     "--results-p1": themeColors.player1,
     "--results-p2": themeColors.player2,
     "--results-accent": themeColors.primary,
@@ -719,6 +735,13 @@ async function fetchLoop() {
   evtSource.onmessage = (event) => {
     document.getElementById("loading").style.display = "none";
     const patch = JSON.parse(event.data);
+    if (
+      gameState &&
+      patch.some((op) => op.path === "" || op.path === "/roundNumber")
+    ) {
+      // applyPatch changes the state in place
+      previousLiveState = structuredClone(gameState);
+    }
     gameState = applyPatch(gameState, patch).newDocument;
     if (gameState === null) {
       return;
@@ -731,6 +754,7 @@ async function fetchLoop() {
     if (newMatch) {
       // Same round numbers, different games
       clearFinishedGames();
+      previousLiveState = null; // Don't stay on a game from the old match
     }
     if (
       viewedGame &&
@@ -777,12 +801,21 @@ function loadGameIntoNinja(game, { live, result = null }) {
   ptn += `\n[Site "Racetrack"]`;
   ptn += `\n[Round "${game.roundNumber}"]`;
   ptn += `\n[Komi "${Number(game.halfKomi) / 2}"]`;
+  const clock = ptnClock(game);
+  if (clock) {
+    ptn += `\n[Clock "${clock}"]`;
+  }
   if (result) {
     ptn += `\n[Result "${result}"]`;
   }
   ptn +=
     " " +
     game.openingMoves.concat(game.moves.map(({ move }) => move)).join(" ");
+  if (result) {
+    // Also after the last move, as PTN has it: PTN Ninja only shows a result
+    // there, and can't tell time or forfeit wins from the position
+    ptn += ` ${result}`;
+  }
 
   sendToNinja("SET_NAME", `Tak Engine Championship: Game ${game.roundNumber}`);
   sendToNinja("SET_CURRENT_PTN", ptn);
@@ -803,6 +836,10 @@ function updateGameState() {
     roundNumber !== gameState.roundNumber ||
     moveCount > gameState.moves.length
   ) {
+    if (shouldStayOnEndedGame()) {
+      stayOnEndedGame();
+      return;
+    }
     // New game
     roundNumber = gameState.roundNumber;
     moveCount = 0;
@@ -810,6 +847,7 @@ function updateGameState() {
     moveCount = gameState.moves.length;
   } else if (moveCount < gameState.moves.length) {
     // New move(s)
+    appendedRound = roundNumber;
     gameState.moves.slice(moveCount).forEach((move) => {
       sendToNinja("APPEND_PLY", move.move);
     });
@@ -868,11 +906,16 @@ async function showFinishedGame(round) {
     result: ptnResult(findResult(gameState?.results, round)?.result),
   });
   updateChart();
+  notifyViewing(game.roundNumber);
+  updateResults();
+}
+
+function notifyViewing(round) {
   sendToNinja("NOTIFY", {
     id: viewingNotificationId,
     // Production PTN Ninja ignores `id`; `group` makes it replace the last one
     group: viewingNotificationId,
-    message: `Viewing game ${game.roundNumber}`,
+    message: `Viewing game ${round}`,
     position: "top-right",
     timeout: 0,
     actions: [
@@ -880,15 +923,144 @@ async function showFinishedGame(round) {
       { icon: "close" },
     ],
   });
-  updateResults();
 }
 
-function showLiveGame() {
+// Whether the live game just ended (the round changed) while the viewer had
+// stepped back in it, so they should stay on it instead of following the new
+// game
+function shouldStayOnEndedGame() {
+  return (
+    viewedGame === null &&
+    roundNumber !== 0 &&
+    roundNumber !== gameState.roundNumber &&
+    previousLiveState?.roundNumber === roundNumber &&
+    ninjaGameState !== null &&
+    !ninjaGameState.isAtEndOfMainBranch
+  );
+}
+
+// Keep showing the game that just ended, as a finished game, where the viewer
+// is in it: PTN Ninja already has it, so it isn't reloaded
+function stayOnEndedGame() {
+  const round = roundNumber;
+  const request = ++finishedGameRequest;
+  viewedGame = finishedGames.get(round) ?? previousLiveState;
+  previousLiveState = null;
+  appendMissingMoves();
+  sendClocks(false);
+  notifyViewing(round);
+  if (endNotifiedRound !== round) {
+    // PTN Ninja only reports a game's end when it's at the last move
+    const result = ptnResult(findResult(gameState.results, round)?.result);
+    if (result) {
+      notifyGameEnded(round, result, null);
+    }
+  }
+  updateChart();
+  updateResults();
+  if (finishedGames.has(round)) {
+    return;
+  }
+  // Racetrack's record of it has any final moves the live state missed
+  const generation = finishedGamesGeneration;
+  fetch(`${SERVER_URL}/games/${round}`)
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      return response.json();
+    })
+    .then((game) => {
+      if (generation === finishedGamesGeneration) {
+        finishedGames.set(round, game);
+      }
+      if (
+        request !== finishedGameRequest ||
+        viewedGame?.roundNumber !== round
+      ) {
+        return;
+      }
+      viewedGame = game;
+      appendMissingMoves();
+      sendClocks(false);
+      updateChart();
+      updateResults();
+    })
+    .catch((error) => {
+      // Keep the copy of the live state
+      console.warn(`Couldn't load game ${round}:`, error);
+    });
+}
+
+// Append the viewed game's moves that PTN Ninja doesn't have yet, if it's
+// still showing that game as it was played live
+function appendMissingMoves() {
+  if (viewedGame.moves.length <= moveCount) {
+    return;
+  }
+  appendedRound = viewedGame.roundNumber;
+  viewedGame.moves.slice(moveCount).forEach((move) => {
+    sendToNinja("APPEND_PLY", move.move);
+  });
+  moveCount = viewedGame.moves.length;
+  saveAnalysisToNotes();
+}
+
+// `url` is the game's PTN Ninja link, or null to ask PTN Ninja for it
+function notifyGameEnded(round, result, url) {
+  endNotifiedRound = round;
+  previousGame = { roundNumber: round, result };
+  if (url) {
+    sendGameEndedNotification(url);
+  } else {
+    sendToNinja("GET_URL");
+  }
+}
+
+function sendGameEndedNotification(url) {
+  sendToNinja("NOTIFY", {
+    // The latest replaces the previous: by `id` where PTN Ninja
+    // supports it, by `group` (and position) on production
+    id: "game-ended",
+    group: "game-ended",
+    icon: "result",
+    message: `Game ${previousGame.roundNumber} ended ${previousGame.result}`,
+    position: "top-right",
+    actions: [
+      {
+        color: "primary",
+        label: "View",
+        icon: "open_in_new",
+        action: "VIEW_FINISHED_GAME",
+        value: url,
+      },
+      {
+        icon: "close",
+      },
+    ],
+  });
+}
+
+// `fromNotification`: the viewing notification's own "Back to live" button was
+// clicked, which already closed it
+function showLiveGame({ fromNotification = false } = {}) {
   finishedGameRequest++; // Drop any finished game still loading
   const wasViewing = viewedGame !== null;
   viewedGame = null;
   if (!wasViewing) {
     return;
+  }
+  if (!fromNotification) {
+    // Production PTN Ninja doesn't support DISMISS_NOTIFY yet, so first
+    // replace the viewing notification (same group and position) with one
+    // that closes itself almost at once. Builds that do support it then find
+    // nothing left to dismiss.
+    sendToNinja("NOTIFY", {
+      group: viewingNotificationId,
+      message: "Back to live",
+      position: "top-right",
+      timeout: 1,
+    });
   }
   sendToNinja("DISMISS_NOTIFY", { id: viewingNotificationId });
   // Reload the live game from scratch on the next update
@@ -1031,39 +1203,29 @@ window.addEventListener(
       case "SET_UI":
         updateNinjaSettings(value);
         break;
-      case "GAME_END":
-        if (viewedGame !== null) {
-          // A finished game was loaded, not the live one ending
-          break;
+      case "GAME_END": {
+        // Only sent when a ply is appended, so it's about the last round
+        // appended, even if a newer game was loaded since
+        const round = appendedRound || roundNumber;
+        if (round === roundNumber) {
+          sendToNinja("SET_TIMER_LIVE", false);
         }
-        previousGame = {
-          roundNumber,
-          result: value.result,
-        };
-        sendToNinja("SET_TIMER_LIVE", false);
-        sendToNinja("GET_URL");
+        if (endNotifiedRound !== round) {
+          notifyGameEnded(
+            round,
+            `${value.result.player1}-${value.result.player2}`,
+            value.url || null,
+          );
+        }
         break;
+      }
       case "GET_URL":
-        sendToNinja("NOTIFY", {
-          icon: "result",
-          message: `Game ${previousGame.roundNumber} ended ${previousGame.result.player1}-${previousGame.result.player2}`,
-          position: "top-right",
-          actions: [
-            {
-              color: "primary",
-              label: "View",
-              icon: "open_in_new",
-              action: "VIEW_FINISHED_GAME",
-              value,
-            },
-            {
-              icon: "close",
-            },
-          ],
-        });
+        if (previousGame) {
+          sendGameEndedNotification(value);
+        }
         break;
       case "BACK_TO_LIVE":
-        showLiveGame();
+        showLiveGame({ fromNotification: true });
         break;
       case "VIEW_FINISHED_GAME":
         window.open(value, "_blank");

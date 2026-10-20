@@ -30,6 +30,8 @@
         display: flex;
         justify-content: center;
         align-items: center;
+        /* Above the results header and the list's sticky header */
+        z-index: 10;
         background-color: rgba(0, 0, 0, 0.7);
         font-family:
           Roboto,
@@ -79,6 +81,8 @@
         --results-p1: #f2f2f2;
         --results-p2: #222;
         --results-accent: #4a90d9;
+        --results-header-bg: #fff;
+        --results-header-text: #666;
         --results-dot-hit: 14px;
       }
       @media (pointer: coarse) {
@@ -87,30 +91,28 @@
         }
       }
 
-      #results {
+      /*
+       * Colours derived from the foreground and surface they're drawn on:
+       * the panel for the strip and list, PTN Ninja's header colours for the
+       * header
+       */
+      #results,
+      #results .results-header {
         --results-draw: color-mix(
           in srgb,
-          var(--results-text) 50%,
-          var(--results-panel)
+          var(--results-fg) 50%,
+          var(--results-surface)
         );
-        --results-line: color-mix(
-          in srgb,
-          var(--results-text) 18%,
-          transparent
-        );
-        --results-hover: color-mix(
-          in srgb,
-          var(--results-text) 7%,
-          transparent
-        );
-        --results-badge: color-mix(
-          in srgb,
-          var(--results-text) 14%,
-          transparent
-        );
+        --results-line: color-mix(in srgb, var(--results-fg) 18%, transparent);
+        --results-hover: color-mix(in srgb, var(--results-fg) 7%, transparent);
+        --results-badge: color-mix(in srgb, var(--results-fg) 14%, transparent);
+      }
+      #results {
+        --results-fg: var(--results-text);
+        --results-surface: var(--results-panel);
         flex: none;
         container: results / inline-size;
-        color: var(--results-text);
+        color: var(--results-fg);
         font-family:
           Roboto,
           -apple-system,
@@ -127,6 +129,38 @@
         display: none;
       }
 
+      /*
+       * The names and counts, like PTN Ninja's header (a 50px q-toolbar in an
+       * elevated q-header): its colours, height and shadow, which only falls
+       * below it
+       */
+      .results-header {
+        --results-fg: var(--results-header-text);
+        --results-surface: var(--results-header-bg);
+        position: relative;
+        z-index: 2;
+        box-sizing: border-box;
+        height: 50px;
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        color: var(--results-fg);
+        /* The header colour can be translucent: lay it over the page background */
+        background:
+          linear-gradient(var(--results-surface), var(--results-surface)),
+          var(--results-bg);
+        box-shadow:
+          0 7px 9px -7px rgba(0, 0, 0, 0.7) inset,
+          0 0 10px 2px rgba(0, 0, 0, 0.2),
+          0 0 10px rgba(0, 0, 0, 0.24);
+        clip-path: inset(0 0 -20px 0);
+        font-size: 14px;
+      }
+      #results.results-multi .results-header {
+        display: none;
+      }
+
+      /* The dots and caret, on the panel: toggles the list */
       .results-strip {
         display: flex;
         align-items: center;
@@ -138,12 +172,9 @@
         outline: 2px solid var(--results-accent);
         outline-offset: -2px;
       }
-      .results-body {
+      .results-score {
         flex: 1;
         min-width: 0;
-      }
-
-      .results-score {
         display: flex;
         align-items: baseline;
         justify-content: space-between;
@@ -163,7 +194,7 @@
       }
       .results-wins {
         flex: none;
-        font-size: 15px;
+        font-size: 16px;
       }
       .results-draws {
         flex: none;
@@ -182,18 +213,9 @@
         text-align: center;
       }
 
-      /* A q-separator-like line between the score and the dots */
-      .results-separator {
-        height: 1px;
-        margin: 4px 0;
-        background: var(--results-line);
-      }
-      #results.results-multi .results-score,
-      #results.results-multi .results-separator {
-        display: none;
-      }
-
       .results-row {
+        flex: 1;
+        min-width: 0;
         display: flex;
         align-items: flex-end;
         gap: 6px;
@@ -225,8 +247,7 @@
         width: 9px;
         height: 9px;
         border-radius: 50%;
-        border: 1px solid
-          color-mix(in srgb, var(--results-text) 35%, transparent);
+        border: 1px solid color-mix(in srgb, var(--results-fg) 35%, transparent);
       }
       .results-dot-white::before {
         background: var(--results-p1);
@@ -238,7 +259,7 @@
         background: var(--results-draw);
       }
       .results-dot-live::before {
-        border: 1px dashed var(--results-text);
+        border: 1px dashed var(--results-fg);
       }
       .results-dot.is-viewing::before {
         outline: 2px solid var(--results-accent);
@@ -276,6 +297,8 @@
       }
       #results.is-open .results-expand {
         grid-template-rows: 1fr;
+        /* Sets the open list apart from the graph below */
+        border-bottom: 1px solid var(--results-line);
       }
       .results-expand-inner {
         min-height: 0;
@@ -418,6 +441,10 @@
           min-height: 0;
           display: flex;
           flex-direction: column;
+        }
+        /* The column's own edge sets it apart from the graph */
+        #results.is-open .results-expand {
+          border-bottom: none;
         }
         #results .results-expand-inner {
           flex: 1;

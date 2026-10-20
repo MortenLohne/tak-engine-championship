@@ -114,3 +114,51 @@ export function buildResultsModel({ engines, results, totalRounds, live }) {
     label,
   };
 }
+
+// Milliseconds in a serde-serialized std::time::Duration ({ secs, nanos }),
+// or null if it isn't one. A missing field counts as zero.
+function durationMs(duration) {
+  if (!duration || typeof duration !== "object") return null;
+  const secs = duration.secs ?? 0;
+  const nanos = duration.nanos ?? 0;
+  if (duration.secs == null && duration.nanos == null) return null;
+  if (!Number.isFinite(secs) || !Number.isFinite(nanos)) return null;
+  if (secs < 0 || nanos < 0) return null;
+  return secs * 1000 + Math.round(nanos / 1e6);
+}
+
+// Seconds with up to millisecond precision and no trailing zeros
+function formatSeconds(ms) {
+  return String(Number((ms / 1000).toFixed(3)));
+}
+
+// One side's time control as PTN Ninja's Clock tag shows it: "M:SS +I",
+// minutes and seconds of the initial time and the increment in seconds,
+// e.g. "10:00 +5" or "0:10 +0.1"
+export function formatClock(timeMs, incrementMs) {
+  const minutes = Math.floor(timeMs / 60000);
+  const seconds = formatSeconds(timeMs - minutes * 60000);
+  const [whole, fraction] = seconds.split(".");
+  const ss = whole.padStart(2, "0") + (fraction ? `.${fraction}` : "");
+  return `${minutes}:${ss} +${formatSeconds(incrementMs)}`;
+}
+
+// The PTN `[Clock]` value for a game state's time control, or null when
+// Racetrack didn't send one (older versions), it's incomplete, has no initial
+// time, or the sides have different time controls
+export function ptnClock(game) {
+  const whiteTime = durationMs(game?.whiteTime);
+  const whiteIncrement = durationMs(game?.whiteIncrement);
+  const blackTime = durationMs(game?.blackTime);
+  const blackIncrement = durationMs(game?.blackIncrement);
+  if (
+    whiteTime === null ||
+    whiteIncrement === null ||
+    blackTime === null ||
+    blackIncrement === null
+  )
+    return null;
+  if (whiteTime !== blackTime || whiteIncrement !== blackIncrement) return null;
+  if (whiteTime <= 0) return null;
+  return formatClock(whiteTime, whiteIncrement);
+}
