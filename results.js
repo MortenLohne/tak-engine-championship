@@ -117,7 +117,7 @@ export function buildResultsModel({ engines, results, totalRounds, live }) {
 
 // Milliseconds in a serde-serialized std::time::Duration ({ secs, nanos }),
 // or null if it isn't one. A missing field counts as zero.
-function durationMs(duration) {
+export function durationMs(duration) {
   if (!duration || typeof duration !== "object") return null;
   const secs = duration.secs ?? 0;
   const nanos = duration.nanos ?? 0;

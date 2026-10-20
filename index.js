@@ -3,6 +3,7 @@ import Chart from "https://esm.sh/chart.js@4.5.0/auto";
 import {
   buildResultsModel,
   findResult,
+  durationMs,
   isNewMatch,
   matchInfo,
   ptnClock,
@@ -38,9 +39,20 @@ let reconnected = false; // Whether the stream reconnected since the last state
 let finishedGameRequest = 0; // Latest showFinishedGame call, to drop stale loads
 let roundNumber = 0;
 let moveCount = 0;
-let previousGame = null; // The game whose "ended" notification is pending
-let appendedRound = 0; // Round of the last ply appended to PTN Ninja
-let endNotifiedRound = null; // Round of the last "Game N ended" notification
+// Whether PTN Ninja has the live game as it was played, plies appended to it
+// (also while staying on it after it ended), rather than a loaded finished game
+let ninjaHasLiveGame = false;
+// The round of each APPEND_PLY sent, until PTN Ninja reports appending it
+let sentAppends = [];
+// The round of the ply PTN Ninja last reported appending, if it was one of
+// ours: what a GAME_END that follows is about
+let lastAppendedRound = null;
+// Whether PTN Ninja hasn't yet reported going to the last ply of the game
+// last loaded, so its game state may still be of an earlier game
+let awaitingNinjaLast = false;
+const endNotifiedRounds = new Set(); // Rounds with a "Game N ended" notification
+// "Game N ended" notifications waiting for PTN Ninja's GET_URL reply, in order
+const pendingEndNotifications = [];
 // A copy of the live state from before the round last changed: the game that
 // just ended, until Racetrack's record of it is loaded
 let previousLiveState = null;
@@ -396,26 +408,13 @@ function updateResults() {
 
 //#region Clock sync
 
-// Convert a serde-serialized std::time::Duration ({ secs, nanos }) to ms
-function durationToMs(duration) {
-  if (!duration || typeof duration !== "object") {
-    return null;
-  }
-  const secs = Number(duration.secs);
-  const nanos = Number(duration.nanos);
-  if (!Number.isFinite(secs) || !Number.isFinite(nanos)) {
-    return null;
-  }
-  return secs * 1000 + Math.round(nanos / 1e6);
-}
-
 function sendClocks(isLive) {
   const game = shownGame();
   if (!game) {
     return;
   }
-  const time1 = durationToMs(game.whiteTimeLeft);
-  const time2 = durationToMs(game.blackTimeLeft);
+  const time1 = durationMs(game.whiteTimeLeft);
+  const time2 = durationMs(game.blackTimeLeft);
   if (time1 === null || time2 === null) {
     return;
   }
@@ -754,7 +753,9 @@ async function fetchLoop() {
     if (newMatch) {
       // Same round numbers, different games
       clearFinishedGames();
+      endNotifiedRounds.clear();
       previousLiveState = null; // Don't stay on a game from the old match
+      roundNumber = 0; // Nor notify that the old match's game ended
     }
     if (
       viewedGame &&
@@ -777,6 +778,7 @@ async function fetchLoop() {
     // Racetrack may have restarted with another match
     reconnected = true;
     clearFinishedGames();
+    endNotifiedRounds.clear();
     sendToNinja("SET_TIMER_LIVE", false);
     evtSource.close();
     window.setTimeout(fetchLoop, 2000);
@@ -819,6 +821,11 @@ function loadGameIntoNinja(game, { live, result = null }) {
 
   sendToNinja("SET_NAME", `Tak Engine Championship: Game ${game.roundNumber}`);
   sendToNinja("SET_CURRENT_PTN", ptn);
+  ninjaHasLiveGame = live;
+  awaitingNinjaLast = true;
+  // Plies sent before this aren't in the new game
+  sentAppends = [];
+  lastAppendedRound = null;
   sendToNinja("LAST");
   savedNotePlies.clear();
   saveAnalysisToNotes();
@@ -836,6 +843,10 @@ function updateGameState() {
     roundNumber !== gameState.roundNumber ||
     moveCount > gameState.moves.length
   ) {
+    if (roundNumber !== 0 && roundNumber !== gameState.roundNumber) {
+      // Before loading the next game, while PTN Ninja still has this one
+      notifyRoundEnded(roundNumber);
+    }
     if (shouldStayOnEndedGame()) {
       stayOnEndedGame();
       return;
@@ -847,9 +858,8 @@ function updateGameState() {
     moveCount = gameState.moves.length;
   } else if (moveCount < gameState.moves.length) {
     // New move(s)
-    appendedRound = roundNumber;
     gameState.moves.slice(moveCount).forEach((move) => {
-      sendToNinja("APPEND_PLY", move.move);
+      appendPly(roundNumber, move.move);
     });
     saveAnalysisToNotes();
     sendClocks(true);
@@ -867,32 +877,44 @@ function updateGameState() {
 
 const viewingNotificationId = "viewing-finished-game";
 
+// The finished game `round` from the cache, or else from Racetrack
+async function fetchFinishedGame(round) {
+  const cached = finishedGames.get(round);
+  if (cached) {
+    return cached;
+  }
+  const generation = finishedGamesGeneration;
+  const response = await fetch(`${SERVER_URL}/games/${round}`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const game = await response.json();
+  if (generation === finishedGamesGeneration) {
+    finishedGames.set(round, game);
+  }
+  return game;
+}
+
 async function showFinishedGame(round) {
   const request = ++finishedGameRequest; // Also drops any other game loading
   if (viewedGame?.roundNumber === round) {
-    // Already shown: don't reload it
+    // Already shown: don't reload it, but retry loading Racetrack's record
+    // of a game that was stayed on when it ended
+    if (!finishedGames.has(round)) {
+      refreshEndedGame(round, request, { reportErrors: true });
+    }
     updateResults();
     return;
   }
-  const generation = finishedGamesGeneration;
-  let game = finishedGames.get(round);
-  if (!game) {
-    try {
-      const response = await fetch(`${SERVER_URL}/games/${round}`);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      game = await response.json();
-    } catch (error) {
-      console.warn(`Couldn't load game ${round}:`, error);
-      if (request === finishedGameRequest) {
-        sendToNinja("NOTIFY_ERROR", `Couldn't load game ${round}`);
-      }
-      return;
+  let game;
+  try {
+    game = await fetchFinishedGame(round);
+  } catch (error) {
+    console.warn(`Couldn't load game ${round}:`, error);
+    if (request === finishedGameRequest) {
+      sendToNinja("NOTIFY_ERROR", `Couldn't load game ${round}`);
     }
-    if (generation === finishedGamesGeneration) {
-      finishedGames.set(round, game);
-    }
+    return;
   }
   if (request !== finishedGameRequest) {
     // Another game, or the live one, was chosen in the meantime
@@ -935,6 +957,7 @@ function shouldStayOnEndedGame() {
     roundNumber !== gameState.roundNumber &&
     previousLiveState?.roundNumber === roundNumber &&
     ninjaGameState !== null &&
+    !awaitingNinjaLast &&
     !ninjaGameState.isAtEndOfMainBranch
   );
 }
@@ -944,36 +967,28 @@ function shouldStayOnEndedGame() {
 function stayOnEndedGame() {
   const round = roundNumber;
   const request = ++finishedGameRequest;
-  viewedGame = finishedGames.get(round) ?? previousLiveState;
+  viewedGame = finishedGames.get(round);
+  if (!viewedGame) {
+    viewedGame = previousLiveState;
+    // Its live analysis is of a position that's no longer being searched
+    viewedGame.currentMoveUciInfo = null;
+  }
   previousLiveState = null;
   appendMissingMoves();
   sendClocks(false);
   notifyViewing(round);
-  if (endNotifiedRound !== round) {
-    // PTN Ninja only reports a game's end when it's at the last move
-    const result = ptnResult(findResult(gameState.results, round)?.result);
-    if (result) {
-      notifyGameEnded(round, result, null);
-    }
-  }
   updateChart();
   updateResults();
-  if (finishedGames.has(round)) {
-    return;
+  if (!finishedGames.has(round)) {
+    refreshEndedGame(round, request);
   }
-  // Racetrack's record of it has any final moves the live state missed
-  const generation = finishedGamesGeneration;
-  fetch(`${SERVER_URL}/games/${round}`)
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      return response.json();
-    })
+}
+
+// Load Racetrack's record of the stayed-on game `round`, which has any final
+// moves and the result the live state missed
+function refreshEndedGame(round, request, { reportErrors = false } = {}) {
+  fetchFinishedGame(round)
     .then((game) => {
-      if (generation === finishedGamesGeneration) {
-        finishedGames.set(round, game);
-      }
       if (
         request !== finishedGameRequest ||
         viewedGame?.roundNumber !== round
@@ -983,48 +998,72 @@ function stayOnEndedGame() {
       viewedGame = game;
       appendMissingMoves();
       sendClocks(false);
+      notifyRoundEnded(round);
       updateChart();
       updateResults();
     })
     .catch((error) => {
-      // Keep the copy of the live state
+      // Keep the copy of the live state; showing the game again retries
       console.warn(`Couldn't load game ${round}:`, error);
+      if (reportErrors && request === finishedGameRequest) {
+        sendToNinja("NOTIFY_ERROR", `Couldn't load game ${round}`);
+      }
     });
+}
+
+function appendPly(round, ply) {
+  sentAppends.push(round);
+  sendToNinja("APPEND_PLY", ply);
 }
 
 // Append the viewed game's moves that PTN Ninja doesn't have yet, if it's
 // still showing that game as it was played live
 function appendMissingMoves() {
-  if (viewedGame.moves.length <= moveCount) {
+  if (!ninjaHasLiveGame || viewedGame.moves.length <= moveCount) {
     return;
   }
-  appendedRound = viewedGame.roundNumber;
   viewedGame.moves.slice(moveCount).forEach((move) => {
-    sendToNinja("APPEND_PLY", move.move);
+    appendPly(viewedGame.roundNumber, move.move);
   });
   moveCount = viewedGame.moves.length;
   saveAnalysisToNotes();
 }
 
-// `url` is the game's PTN Ninja link, or null to ask PTN Ninja for it
+// Notify that `round` ended, with its result from Racetrack, unless it was
+// already notified or Racetrack has no result for it yet. PTN Ninja's GAME_END
+// misses some endings: time and forfeit wins, a final move that arrives with
+// the next game, or a viewer who isn't at the last move.
+function notifyRoundEnded(round) {
+  const result = ptnResult(findResult(gameState?.results, round)?.result);
+  if (result) {
+    notifyGameEnded(round, result, null);
+  }
+}
+
+// Notify once per game. `url` is the game's PTN Ninja link, or null to ask
+// PTN Ninja for the link of the game it has now, which must be `round`.
 function notifyGameEnded(round, result, url) {
-  endNotifiedRound = round;
-  previousGame = { roundNumber: round, result };
+  if (endNotifiedRounds.has(round)) {
+    return;
+  }
+  endNotifiedRounds.add(round);
+  const ended = { round, result };
   if (url) {
-    sendGameEndedNotification(url);
+    sendGameEndedNotification(ended, url);
   } else {
+    pendingEndNotifications.push(ended);
     sendToNinja("GET_URL");
   }
 }
 
-function sendGameEndedNotification(url) {
+function sendGameEndedNotification({ round, result }, url) {
   sendToNinja("NOTIFY", {
     // The latest replaces the previous: by `id` where PTN Ninja
     // supports it, by `group` (and position) on production
     id: "game-ended",
     group: "game-ended",
     icon: "result",
-    message: `Game ${previousGame.roundNumber} ended ${previousGame.result}`,
+    message: `Game ${round} ended ${result}`,
     position: "top-right",
     actions: [
       {
@@ -1203,27 +1242,47 @@ window.addEventListener(
       case "SET_UI":
         updateNinjaSettings(value);
         break;
+      case "LAST":
+        awaitingNinjaLast = false;
+        break;
+      case "APPEND_PLY":
+        // PTN Ninja reports each ply appended, ours in the order sent; any
+        // other is the viewer's own
+        lastAppendedRound = sentAppends.length ? sentAppends.shift() : null;
+        break;
+      case "INSERT_PLY":
+      case "INSERT_PLIES":
+        lastAppendedRound = null;
+        break;
       case "GAME_END": {
-        // Only sent when a ply is appended, so it's about the last round
-        // appended, even if a newer game was loaded since
-        const round = appendedRound || roundNumber;
+        // Follows the report of the ply that ended the game: only trust it
+        // for one of ours, and name that ply's round, even if a newer game
+        // was loaded since
+        const round = lastAppendedRound;
+        lastAppendedRound = null;
+        if (round === null) {
+          break;
+        }
         if (round === roundNumber) {
           sendToNinja("SET_TIMER_LIVE", false);
         }
-        if (endNotifiedRound !== round) {
-          notifyGameEnded(
-            round,
-            `${value.result.player1}-${value.result.player2}`,
-            value.url || null,
-          );
+        notifyGameEnded(
+          round,
+          `${value.result.player1}-${value.result.player2}`,
+          value.url || null,
+        );
+        break;
+      }
+      case "GET_URL": {
+        if (typeof value !== "string") {
+          break;
+        }
+        const ended = pendingEndNotifications.shift();
+        if (ended) {
+          sendGameEndedNotification(ended, value);
         }
         break;
       }
-      case "GET_URL":
-        if (previousGame) {
-          sendGameEndedNotification(value);
-        }
-        break;
       case "BACK_TO_LIVE":
         showLiveGame({ fromNotification: true });
         break;
