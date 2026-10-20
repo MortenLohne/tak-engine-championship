@@ -12,6 +12,9 @@ const SERVER_URL = (
 ).replace(/\/+$/, "");
 
 let gameState = null;
+let viewedGame = null; // The finished game shown in place of the live one
+const finishedGames = new Map(); // Finished games by round number
+let finishedGameRequest = 0; // Latest showFinishedGame call, to drop stale loads
 let roundNumber = 0;
 let moveCount = 0;
 let previousGame = null;
@@ -156,7 +159,7 @@ const chart = new Chart(document.getElementById("chart"), {
       if (isLastNode) {
         sendToNinja("LAST");
       } else {
-        const plyID = dataIndex + gameState.openingMoves.length;
+        const plyID = dataIndex + shownGame().openingMoves.length;
         sendToNinja("GO_TO_PLY", { plyID, isDone: false });
       }
       ninja.focus();
@@ -217,21 +220,22 @@ const player2FillColor = () =>
 //#region Chart sync
 
 function updateChart() {
-  if (!gameState) {
+  const game = shownGame();
+  if (!game) {
     return;
   }
 
-  let scores = gameState.moves.map((move, i) => {
+  let scores = game.moves.map((move, i) => {
     return {
-      ply: i + gameState.openingMoves.length,
+      ply: i + game.openingMoves.length,
       score: winningProbability(move.uciInfo),
     };
   });
 
-  if (gameState.currentMoveUciInfo) {
+  if (game.currentMoveUciInfo) {
     scores.push({
-      ply: scores.length + gameState.openingMoves.length,
-      score: winningProbability(gameState.currentMoveUciInfo),
+      ply: scores.length + game.openingMoves.length,
+      score: winningProbability(game.currentMoveUciInfo),
     });
   }
 
@@ -239,7 +243,7 @@ function updateChart() {
     labels: scores.map((row) => 1 + row.ply / 2),
     datasets: [
       {
-        label: `${formatName(gameState.whitePlayer)}'s evaluation`,
+        label: `${formatName(game.whitePlayer)}'s evaluation`,
         data: scores.map(({ ply, score }) => (ply % 2 === 0 ? score : null)),
         spanGaps: true,
         borderColor: player1LineColor,
@@ -251,7 +255,7 @@ function updateChart() {
         },
       },
       {
-        label: `${formatName(gameState.blackPlayer)}'s evaluation`,
+        label: `${formatName(game.blackPlayer)}'s evaluation`,
         data: scores.map(({ ply, score }) => (ply % 2 === 1 ? -score : null)),
         spanGaps: true,
         borderColor: player2LineColor,
@@ -275,13 +279,14 @@ resizeChart();
 new ResizeObserver(resizeChart).observe(chartContainer);
 
 function updateChartVerticalLine(plyID = null, plyIsDone = true) {
+  const game = shownGame();
   let lineAtIndex = null;
-  if (gameState && plyID !== null) {
+  if (game && plyID !== null) {
     // plyID from PTN Ninja: position in the game
     // Chart data[i] corresponds to gameState.moves[i]
     // When plyIsDone=true: we're viewing the result of move plyID, so lineAtIndex = plyID - openingMoves.length + 1
     // When plyIsDone=false: we're before the move, so lineAtIndex = plyID - openingMoves.length
-    lineAtIndex = plyID - gameState.openingMoves.length + (plyIsDone ? 1 : 0);
+    lineAtIndex = plyID - game.openingMoves.length + (plyIsDone ? 1 : 0);
     if (lineAtIndex < 0) {
       lineAtIndex = 0;
     }
@@ -325,14 +330,24 @@ function updateTheme(newTheme) {
 //#region Match results
 
 const resultsPanel = createResultsPanel(document.getElementById("results"), {
-  // Replaced by past-game viewing
-  onSelect: (round) => console.debug("Selected game", round),
+  onSelect: (round) => {
+    if (round === null) {
+      showLiveGame();
+    } else {
+      showFinishedGame(round);
+    }
+  },
 });
 if (urlParams.has("debug")) {
   window.__resultsPanel = resultsPanel;
+  window.showFinishedGame = showFinishedGame;
+  window.showLiveGame = showLiveGame;
 }
 
 function updateResults() {
+  if (!gameState) {
+    return;
+  }
   resultsPanel.update(
     buildResultsModel({
       engines: gameState.engines,
@@ -345,7 +360,7 @@ function updateResults() {
         plies: gameState.openingMoves.length + gameState.moves.length,
       },
     }),
-    null,
+    viewedGame?.roundNumber ?? null,
   );
 }
 
@@ -365,15 +380,16 @@ function durationToMs(duration) {
 }
 
 function sendClocks(isLive) {
-  if (!gameState) {
+  const game = shownGame();
+  if (!game) {
     return;
   }
-  const time1 = durationToMs(gameState.whiteTimeLeft);
-  const time2 = durationToMs(gameState.blackTimeLeft);
+  const time1 = durationToMs(game.whiteTimeLeft);
+  const time2 = durationToMs(game.blackTimeLeft);
   if (time1 === null || time2 === null) {
     return;
   }
-  const ply = gameState.openingMoves.length + gameState.moves.length;
+  const ply = game.openingMoves.length + game.moves.length;
   const timerTurn = ply % 2 === 0 ? 1 : 2;
   sendToNinja("SET_GAME_TIME", {
     time1,
@@ -731,7 +747,38 @@ async function fetchLoop() {
   };
 }
 
+function shownGame() {
+  return viewedGame ?? gameState;
+}
+
+// Shows `game` in PTN Ninja from its start, with its notes and clocks
+function loadGameIntoNinja(game, { live }) {
+  let ptn = `[TPS "${game.openingTps}"]`;
+  ptn += `\n[Player1 "${formatName(game.whitePlayer)}"]`;
+  ptn += `\n[Player2 "${formatName(game.blackPlayer)}"]`;
+  ptn += `\n[Size "${game.size}"]`;
+  ptn += `\n[Site "Racetrack"]`;
+  ptn += `\n[Round "${game.roundNumber}"]`;
+  ptn += `\n[Komi "${Number(game.halfKomi) / 2}"]`;
+  ptn +=
+    " " +
+    game.openingMoves.concat(game.moves.map(({ move }) => move)).join(" ");
+
+  sendToNinja("SET_NAME", `Tak Engine Championship: Game ${game.roundNumber}`);
+  sendToNinja("SET_CURRENT_PTN", ptn);
+  sendToNinja("LAST");
+  savedNotePlies.clear();
+  saveAnalysisToNotes();
+  sendClocks(live);
+}
+
 function updateGameState() {
+  if (viewedGame) {
+    // Viewing a finished game: keep the live game's progress for later
+    updateResults();
+    return;
+  }
+
   if (
     roundNumber !== gameState.roundNumber ||
     moveCount > gameState.moves.length
@@ -739,27 +786,9 @@ function updateGameState() {
     // New game
     roundNumber = gameState.roundNumber;
     moveCount = 0;
-    savedNotePlies.clear();
     livePv = { ply: null, pv: [] };
-    let ptn = `[TPS "${gameState.openingTps}"]`;
-    ptn += `\n[Player1 "${formatName(gameState.whitePlayer)}"]`;
-    ptn += `\n[Player2 "${formatName(gameState.blackPlayer)}"]`;
-    ptn += `\n[Size "${gameState.size}"]`;
-    ptn += `\n[Site "Racetrack"]`;
-    ptn += `\n[Round "${gameState.roundNumber}"]`;
-    ptn += `\n[Komi "${Number(gameState.halfKomi) / 2}"]`;
-    ptn +=
-      " " +
-      gameState.openingMoves
-        .concat(gameState.moves.map(({ move }) => move))
-        .join(" ");
-
-    sendToNinja("SET_NAME", `Tak Engine Championship: Game ${roundNumber}`);
-    sendToNinja("SET_CURRENT_PTN", ptn);
-    sendToNinja("LAST");
-    saveAnalysisToNotes();
+    loadGameIntoNinja(gameState, { live: true });
     trackLivePv();
-    sendClocks(true);
     moveCount = gameState.moves.length;
   } else if (moveCount < gameState.moves.length) {
     // New move(s)
@@ -782,40 +811,96 @@ function updateGameState() {
   updateResults();
 }
 
-//#region PTN Ninja sync
+const viewingNotificationId = "viewing-finished-game";
 
-function setCurrentAnalysis() {
-  if (!gameState || !ninjaGameState) {
+async function showFinishedGame(round) {
+  const request = ++finishedGameRequest;
+  let game = finishedGames.get(round);
+  if (!game) {
+    try {
+      const response = await fetch(`${SERVER_URL}/games/${round}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      game = await response.json();
+    } catch (error) {
+      console.warn(`Couldn't load game ${round}:`, error);
+      if (request === finishedGameRequest) {
+        sendToNinja("NOTIFY_ERROR", `Couldn't load game ${round}`);
+      }
+      return;
+    }
+    finishedGames.set(round, game);
+  }
+  if (request !== finishedGameRequest) {
+    // Another game, or the live one, was chosen in the meantime
     return;
   }
 
-  if (ninjaGameState.isAtEndOfMainBranch && gameState.currentMoveUciInfo) {
+  viewedGame = game;
+  loadGameIntoNinja(game, { live: false });
+  updateChart();
+  sendToNinja("NOTIFY", {
+    id: viewingNotificationId,
+    message: `Viewing game ${game.roundNumber}`,
+    position: "top-right",
+    timeout: 0,
+    actions: [
+      { color: "primary", label: "Back to live", action: "BACK_TO_LIVE" },
+      { icon: "close" },
+    ],
+  });
+  updateResults();
+}
+
+function showLiveGame() {
+  finishedGameRequest++; // Drop any finished game still loading
+  const wasViewing = viewedGame !== null;
+  viewedGame = null;
+  if (!wasViewing) {
+    return;
+  }
+  sendToNinja("DISMISS_NOTIFY", { id: viewingNotificationId });
+  // Reload the live game from scratch on the next update
+  roundNumber = 0;
+  if (gameState) {
+    updateGameState();
+  }
+}
+
+//#region PTN Ninja sync
+
+function setCurrentAnalysis() {
+  const game = shownGame();
+  if (!game || !ninjaGameState) {
+    return;
+  }
+
+  if (ninjaGameState.isAtEndOfMainBranch && game.currentMoveUciInfo) {
     // At the end of the game - show real-time analysis
     const turn = ninjaGameState.turn;
     const botName =
-      turn === 1
-        ? formatName(gameState.whitePlayer)
-        : formatName(gameState.blackPlayer);
-    const uciInfo = { ...gameState.currentMoveUciInfo, pv: livePv.pv };
+      turn === 1 ? formatName(game.whitePlayer) : formatName(game.blackPlayer);
+    const uciInfo = { ...game.currentMoveUciInfo, pv: livePv.pv };
     sendToNinja("SET_ANALYSIS", formatAnalysis(uciInfo, turn, null, botName));
     sendToNinja("SET_EVAL", formatEval(uciInfo, turn));
   } else {
     // Historical position - show saved analysis from moves
-    const openingMoveCount = gameState.openingMoves.length;
+    const openingMoveCount = game.openingMoves.length;
     // plyID = moveIndex + openingMoveCount - 1, so moveIndex = plyID - openingMoveCount + 1
     const moveIndex =
       ninjaGameState.plyID -
       openingMoveCount +
       (ninjaGameState.plyIsDone ? 1 : 0);
 
-    if (moveIndex >= 0 && moveIndex < gameState.moves.length) {
-      const move = gameState.moves[moveIndex];
+    if (moveIndex >= 0 && moveIndex < game.moves.length) {
+      const move = game.moves[moveIndex];
       if (move && move.uciInfo) {
         const turn = ninjaGameState.turn;
         const botName =
           turn === 1
-            ? formatName(gameState.whitePlayer)
-            : formatName(gameState.blackPlayer);
+            ? formatName(game.whitePlayer)
+            : formatName(game.blackPlayer);
         sendToNinja(
           "SET_ANALYSIS",
           formatAnalysis(move.uciInfo, turn, null, botName),
@@ -831,11 +916,13 @@ function setCurrentAnalysis() {
 }
 
 function saveAnalysisToNotes() {
+  const game = shownGame();
+  const isLive = viewedGame === null;
   const notes = {};
-  const openingMoveCount = gameState.openingMoves.length;
+  const openingMoveCount = game.openingMoves.length;
 
   // Save analysis for completed moves (only those not already saved)
-  gameState.moves.forEach((move, i) => {
+  game.moves.forEach((move, i) => {
     const plyID = i + openingMoveCount - 1;
 
     // Skip if already saved
@@ -847,15 +934,14 @@ function saveAnalysisToNotes() {
     const ply = i + openingMoveCount;
     const turn = ply % 2 === 0 ? 1 : 2;
     const name =
-      turn === 1
-        ? formatName(gameState.whitePlayer)
-        : formatName(gameState.blackPlayer);
+      turn === 1 ? formatName(game.whitePlayer) : formatName(game.blackPlayer);
 
     // The final info line may itself be a truncated bound result
-    const uciInfo = move.uciInfo && {
-      ...move.uciInfo,
-      pv: pvWithContinuation(move.uciInfo.pv, ply),
-    };
+    // (only the live game's search was tracked)
+    const uciInfo =
+      move.uciInfo && isLive
+        ? { ...move.uciInfo, pv: pvWithContinuation(move.uciInfo.pv, ply) }
+        : move.uciInfo;
     notes[plyID] = formatEngineNotes(uciInfo, turn, name);
     savedNotePlies.add(plyID);
   });
@@ -922,6 +1008,10 @@ window.addEventListener(
         updateNinjaSettings(value);
         break;
       case "GAME_END":
+        if (viewedGame !== null) {
+          // A finished game was loaded, not the live one ending
+          break;
+        }
         previousGame = {
           roundNumber,
           result: value.result,
@@ -947,6 +1037,9 @@ window.addEventListener(
             },
           ],
         });
+        break;
+      case "BACK_TO_LIVE":
+        showLiveGame();
         break;
       case "VIEW_FINISHED_GAME":
         window.open(value, "_blank");
