@@ -1,4 +1,4 @@
-// The match results strip (score, bar, one dot per game) and its collapsible
+// The match results strip (score and one dot per game) and its collapsible
 // game list. Rendering only: the model comes from results.js.
 
 const OPEN_STORAGE_KEY = "resultsOpen";
@@ -67,11 +67,11 @@ export function createResultsPanel(root, { onSelect }) {
     <div class="results-strip" role="button" tabindex="0" aria-controls="results-games" aria-expanded="false">
       <div class="results-body">
         <div class="results-score">
-          <span class="results-side results-side-a"><span class="results-name"></span><b class="results-wins results-count"></b></span>
+          <span class="results-side"><span class="results-name"></span><b class="results-wins results-count"></b></span>
           <span class="results-draws">· <b class="results-count"></b> <span class="results-draws-word"></span> ·</span>
-          <span class="results-side results-side-b"><b class="results-wins results-count"></b><span class="results-name"></span></span>
+          <span class="results-side"><b class="results-wins results-count"></b><span class="results-name"></span></span>
         </div>
-        <div class="results-bar"><span class="results-bar-a"></span><span class="results-bar-draw"></span><span class="results-bar-b"></span></div>
+        <div class="results-separator"></div>
         <div class="results-row">
           <div class="results-dots"></div>
           <span class="results-label"></span>
@@ -105,9 +105,6 @@ export function createResultsPanel(root, { onSelect }) {
   const [winsA, winsB] = root.querySelectorAll(".results-wins");
   const drawsCount = root.querySelector(".results-draws .results-count");
   const drawsWord = root.querySelector(".results-draws-word");
-  const barA = root.querySelector(".results-bar-a");
-  const barDraw = root.querySelector(".results-bar-draw");
-  const barB = root.querySelector(".results-bar-b");
   const dots = root.querySelector(".results-dots");
   const label = root.querySelector(".results-label");
   const list = root.querySelector(".results-games");
@@ -356,9 +353,6 @@ export function createResultsPanel(root, { onSelect }) {
       setText(drawsCount, String(model.draws));
       setText(drawsWord, drawWord);
       score.setAttribute("aria-label", `${a} ${wa} · ${drawText} · ${wb} ${b}`);
-      barA.style.flexGrow = wa;
-      barDraw.style.flexGrow = model.draws;
-      barB.style.flexGrow = wb;
     }
     setText(label, model.label || "");
   }

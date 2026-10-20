@@ -182,25 +182,14 @@
         text-align: center;
       }
 
-      .results-bar {
-        display: flex;
-        height: 4px;
+      /* A q-separator-like line between the score and the dots */
+      .results-separator {
+        height: 1px;
         margin: 4px 0;
-        border-radius: 2px;
-        overflow: hidden;
         background: var(--results-line);
       }
-      .results-bar-a {
-        background: var(--results-p1);
-      }
-      .results-bar-draw {
-        background: var(--results-draw);
-      }
-      .results-bar-b {
-        background: var(--results-p2);
-      }
       #results.results-multi .results-score,
-      #results.results-multi .results-bar {
+      #results.results-multi .results-separator {
         display: none;
       }
 
@@ -239,11 +228,9 @@
         border: 1px solid
           color-mix(in srgb, var(--results-text) 35%, transparent);
       }
-      .results-dot-a::before,
       .results-dot-white::before {
         background: var(--results-p1);
       }
-      .results-dot-b::before,
       .results-dot-black::before {
         background: var(--results-p2);
       }

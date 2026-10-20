@@ -42,7 +42,7 @@ test("counts wins and draws", () => {
   assert.deepEqual(m.names, ["syntaks", "takzero"]);
 });
 
-test("dots from engine A", () => {
+test("dots show the winning side's colour", () => {
   const m = buildResultsModel({
     engines,
     results: [
@@ -54,12 +54,14 @@ test("dots from engine A", () => {
   });
   assert.deepEqual(
     m.games.map((g) => g.dot),
-    ["a", "b", "draw"],
+    ["black", "white", "draw"],
   );
   assert.equal(m.games[0].white, "takzero");
   assert.equal(m.games[0].black, "syntaks");
   assert.equal(m.games[0].winner, "black");
   assert.equal(m.games[0].live, false);
+  // Still counted per engine: syntaks won game 1 as Black, takzero game 2 as White
+  assert.deepEqual(m.wins, [1, 1]);
 });
 
 test("live row last", () => {

@@ -21,13 +21,11 @@ export function buildResultsModel({ engines, results, totalRounds, live }) {
   let draws = 0;
   const games = sorted.map((g) => {
     const winner = resultWinner(g.result);
-    let dot = winner;
     if (winner === "draw") {
       draws++;
     } else if (twoEngines) {
       const winnerEngine = winner === "white" ? g.whiteEngine : g.blackEngine;
       wins[winnerEngine === 0 ? 0 : 1]++;
-      dot = winnerEngine === 0 ? "a" : "b";
     }
     return {
       round: g.roundNumber,
@@ -36,7 +34,8 @@ export function buildResultsModel({ engines, results, totalRounds, live }) {
       result: g.result,
       moves: fullMoves(g.plies),
       winner,
-      dot,
+      // The winning side's colour, not the engine's: engines swap sides
+      dot: winner,
       live: false,
     };
   });
