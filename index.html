@@ -103,6 +103,11 @@
           var(--results-text) 7%,
           transparent
         );
+        --results-badge: color-mix(
+          in srgb,
+          var(--results-text) 14%,
+          transparent
+        );
         flex: none;
         container: results / inline-size;
         color: var(--results-text);
@@ -163,6 +168,18 @@
       .results-draws {
         flex: none;
         opacity: 0.75;
+      }
+      /* Pill badges set the counts apart from (versioned) engine names */
+      .results-count {
+        display: inline-block;
+        flex: none;
+        box-sizing: border-box;
+        min-width: 1.6em;
+        padding: 0 0.45em;
+        border-radius: 999px;
+        background: var(--results-badge);
+        line-height: 1.35;
+        text-align: center;
       }
 
       .results-bar {

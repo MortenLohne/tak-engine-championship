@@ -867,6 +867,8 @@ async function showFinishedGame(round) {
   updateChart();
   sendToNinja("NOTIFY", {
     id: viewingNotificationId,
+    // Production PTN Ninja ignores `id`; `group` makes it replace the last one
+    group: viewingNotificationId,
     message: `Viewing game ${game.roundNumber}`,
     position: "top-right",
     timeout: 0,

@@ -67,9 +67,9 @@ export function createResultsPanel(root, { onSelect }) {
     <div class="results-strip" role="button" tabindex="0" aria-controls="results-games" aria-expanded="false">
       <div class="results-body">
         <div class="results-score">
-          <span class="results-side results-side-a"><span class="results-name"></span><b class="results-wins"></b></span>
-          <span class="results-draws"></span>
-          <span class="results-side results-side-b"><b class="results-wins"></b><span class="results-name"></span></span>
+          <span class="results-side results-side-a"><span class="results-name"></span><b class="results-wins results-count"></b></span>
+          <span class="results-draws">· <b class="results-count"></b> <span class="results-draws-word"></span> ·</span>
+          <span class="results-side results-side-b"><b class="results-wins results-count"></b><span class="results-name"></span></span>
         </div>
         <div class="results-bar"><span class="results-bar-a"></span><span class="results-bar-draw"></span><span class="results-bar-b"></span></div>
         <div class="results-row">
@@ -103,7 +103,8 @@ export function createResultsPanel(root, { onSelect }) {
   const score = root.querySelector(".results-score");
   const [nameA, nameB] = root.querySelectorAll(".results-name");
   const [winsA, winsB] = root.querySelectorAll(".results-wins");
-  const drawsEl = root.querySelector(".results-draws");
+  const drawsCount = root.querySelector(".results-draws .results-count");
+  const drawsWord = root.querySelector(".results-draws-word");
   const barA = root.querySelector(".results-bar-a");
   const barDraw = root.querySelector(".results-bar-draw");
   const barB = root.querySelector(".results-bar-b");
@@ -346,12 +347,14 @@ export function createResultsPanel(root, { onSelect }) {
     if (model.twoEngines) {
       const [a, b] = model.names;
       const [wa, wb] = model.wins;
-      const drawText = `${model.draws} ${model.draws === 1 ? "draw" : "draws"}`;
+      const drawWord = model.draws === 1 ? "draw" : "draws";
+      const drawText = `${model.draws} ${drawWord}`;
       setText(nameA, a);
       setText(nameB, b);
       setText(winsA, String(wa));
       setText(winsB, String(wb));
-      setText(drawsEl, `· ${drawText} ·`);
+      setText(drawsCount, String(model.draws));
+      setText(drawsWord, drawWord);
       score.setAttribute("aria-label", `${a} ${wa} · ${drawText} · ${wb} ${b}`);
       barA.style.flexGrow = wa;
       barDraw.style.flexGrow = model.draws;
