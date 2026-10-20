@@ -1293,16 +1293,21 @@ function saveAnalysisToNotes() {
       turn === 1 ? formatName(game.whitePlayer) : formatName(game.blackPlayer);
 
     const uciInfo = move.uciInfo;
-    notes[plyID] = formatEngineNotes(uciInfo, turn, name);
+    // Engine notes describe the position the engine searched, before its move
+    notes[plyID] = [
+      ...(notes[plyID] ?? []),
+      ...formatEngineNotes(uciInfo, turn, name),
+    ];
 
     // The mover's remaining time after this move (player 1 makes the even
-    // plies), when the server sends clocks
+    // plies), when the server sends clocks. Unlike the engine notes, it goes
+    // on the move's own ply, as PTN Ninja does for PlayTak games.
     const clock = clockNote(
       turn,
       turn === 1 ? move.whiteTimeLeft : move.blackTimeLeft,
     );
     if (clock) {
-      notes[plyID].push(clock);
+      notes[ply] = [...(notes[ply] ?? []), clock];
     }
     savedNotePlies.add(plyID);
   });
