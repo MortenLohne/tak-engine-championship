@@ -72,6 +72,37 @@
         min-height: 0;
       }
 
+      /* Win % / centipawns toggle, in the chart's top-right corner */
+      #eval-mode {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        display: flex;
+        border: 1px solid var(--results-accent);
+        border-radius: 4px;
+        overflow: hidden;
+        font:
+          500 11px/1 Roboto,
+          -apple-system,
+          Helvetica Neue,
+          Helvetica,
+          Arial,
+          sans-serif;
+      }
+      #eval-mode button {
+        padding: 3px 7px;
+        border: 0;
+        background: transparent;
+        color: var(--results-text);
+        font: inherit;
+        cursor: pointer;
+      }
+      #eval-mode button[aria-pressed="true"] {
+        background: var(--results-accent);
+        color: var(--results-accent-text);
+        cursor: default;
+      }
+
       /* Match results strip and game list */
 
       :root {
@@ -497,6 +528,10 @@
         <div id="results" hidden></div>
         <div id="chart-area">
           <canvas id="chart" width></canvas>
+          <div id="eval-mode" role="group" aria-label="Evaluation scale">
+            <button type="button" data-mode="winrate">Win %</button>
+            <button type="button" data-mode="cp">cp</button>
+          </div>
         </div>
       </div>
     </div>

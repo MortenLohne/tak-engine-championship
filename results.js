@@ -52,6 +52,31 @@ export function ptnResult(result) {
   return r && r !== "*" ? r : null;
 }
 
+// Mate scores have no centipawn value comparable to the engine's others, so
+// the centipawn graph pins them (and anything beyond) to this cap
+export const MATE_CP = 20000;
+
+// The engine's reported centipawn score, from its own point of view
+export function centipawns(uciInfo) {
+  if (!uciInfo) return null;
+  if (uciInfo.mate != null && Number.isFinite(Number(uciInfo.mate))) {
+    return Number(uciInfo.mate) < 0 ? -MATE_CP : MATE_CP;
+  }
+  const cp = Number(uciInfo.cpScore);
+  if (uciInfo.cpScore == null || !Number.isFinite(cp)) return null;
+  return Math.max(-MATE_CP, Math.min(MATE_CP, cp));
+}
+
+// A symmetric log scale for centipawns: linear-ish near zero, compressed
+// for large advantages, and defined for negative values
+export function symlog(cp) {
+  return Math.sign(cp) * Math.log10(1 + Math.abs(cp) / 100);
+}
+
+export function symlogInverse(y) {
+  return Math.sign(y) * 100 * (10 ** Math.abs(y) - 1);
+}
+
 // Whether every scheduled game has finished. Never true when the number of
 // games isn't known (SPRT, or an older Racetrack without totalRounds).
 export function isMatchOver({ results, totalRounds } = {}) {

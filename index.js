@@ -2,13 +2,17 @@ import { applyPatch } from "https://esm.sh/fast-json-patch@3.1.1";
 import Chart from "https://esm.sh/chart.js@4.5.0/auto";
 import {
   buildResultsModel,
+  centipawns,
   durationMs,
   findResult,
   isMatchOver,
   isNewMatch,
   matchInfo,
+  MATE_CP,
   ptnClock,
   ptnResult,
+  symlog,
+  symlogInverse,
 } from "./results.js";
 import { createResultsPanel } from "./results-panel.js";
 
@@ -130,13 +134,74 @@ if (chartSettings) {
     fixYAxis: false,
   };
 }
+// "winrate" (the default) or "cp"
+const isCentipawnMode = () => chartSettings.evalMode === "cp";
+
 function setChartSettings(key, value) {
   chartSettings[key] = value;
   localStorage.setItem(chartSettingsStorageKey, JSON.stringify(chartSettings));
-  const scale = chartSettings.fixYAxis ? 100 : 10;
-  chart.config.options.scales.y.suggestedMax = scale;
-  chart.config.options.scales.y.suggestedMin = -scale;
+  applyYAxis();
+  updateChart();
+  updateEvalModeToggle();
+}
+
+// Centipawn axis ticks at round values, placed on the symlog scale
+const CP_TICKS = [100, 300, 1000, 3000, 10000];
+
+function formatCentipawns(cp) {
+  if (Math.abs(cp) >= MATE_CP) {
+    return cp > 0 ? "+Mate" : "−Mate";
+  }
+  const rounded = Math.round(cp);
+  return rounded > 0 ? `+${rounded}` : String(rounded).replace("-", "−");
+}
+
+function applyYAxis() {
+  const y = chart.config.options.scales.y;
+  const tooltip = chart.config.options.plugins.tooltip;
+  if (isCentipawnMode()) {
+    const limit = symlog(chartSettings.fixYAxis ? MATE_CP : 300);
+    y.suggestedMin = -limit;
+    y.suggestedMax = limit;
+    y.afterBuildTicks = (scale) => {
+      const values = [0, MATE_CP, ...CP_TICKS]
+        .flatMap((cp) => (cp ? [cp, -cp] : [cp]))
+        .map(symlog)
+        .filter((v) => v >= scale.min - 1e-9 && v <= scale.max + 1e-9)
+        .sort((a, b) => a - b);
+      scale.ticks = values.map((value) => ({ value }));
+    };
+    y.ticks.callback = (value) => formatCentipawns(symlogInverse(value));
+    y.title = {
+      display: false, // Set by evalModeLayoutPlugin from the chart's height
+      text: "Centipawns (each engine's own scale)",
+      color: y.ticks.color,
+    };
+    tooltip.callbacks = {
+      label: (context) =>
+        `${context.dataset.label}: ${formatCentipawns(
+          symlogInverse(context.parsed.y),
+        )}`,
+    };
+  } else {
+    const scale = chartSettings.fixYAxis ? 100 : 10;
+    y.suggestedMin = -scale;
+    y.suggestedMax = scale;
+    delete y.afterBuildTicks;
+    delete y.ticks.callback;
+    y.title = { display: false };
+    tooltip.callbacks = {};
+  }
   chart.update();
+}
+
+// The value plotted for one engine report, from that engine's point of view
+function plottedEvaluation(uciInfo) {
+  if (isCentipawnMode()) {
+    const cp = centipawns(uciInfo);
+    return cp === null ? null : symlog(cp);
+  }
+  return winningProbability(uciInfo);
 }
 
 //#region Chart initialization
@@ -174,6 +239,38 @@ const verticalLinePlugin = {
   },
 };
 
+// Keeps the legend clear of the Win % / cp toggle in the top-right corner,
+// and drops the centipawn axis title where the chart is too short for it
+const evalModeLayoutPlugin = {
+  id: "evalModeLayout",
+  afterLayout(chart) {
+    const toggle = document.getElementById("eval-mode");
+    // Item positions aren't set until the legend draws; row widths are
+    const rows = chart.legend?.lineWidths ?? [];
+    let changed = false;
+    if (toggle && rows.length) {
+      const legendRight = chart.legend.left + Math.max(...rows);
+      const toggleLeft = chart.width - toggle.offsetWidth - 12;
+      const top = legendRight > toggleLeft ? toggle.offsetHeight + 6 : 0;
+      const padding = chart.options.layout.padding;
+      if ((padding?.top ?? 0) !== top) {
+        chart.options.layout.padding = { top };
+        changed = true;
+      }
+    }
+    const title = chart.options.scales.y.title;
+    const showTitle = isCentipawnMode() && chart.height >= 260;
+    if (Boolean(title?.display) !== showTitle) {
+      title.display = showTitle;
+      changed = true;
+    }
+    if (changed) {
+      // Re-run layout with the new padding once this one has finished
+      requestAnimationFrame(() => chart.update());
+    }
+  },
+};
+
 const chart = new Chart(document.getElementById("chart"), {
   type: "line",
   data: {
@@ -181,7 +278,7 @@ const chart = new Chart(document.getElementById("chart"), {
     datasets: [],
   },
   lineAtIndex: null,
-  plugins: [verticalLinePlugin],
+  plugins: [verticalLinePlugin, evalModeLayoutPlugin],
   options: {
     animations: false,
     maintainAspectRatio: false,
@@ -204,10 +301,13 @@ const chart = new Chart(document.getElementById("chart"), {
     },
     plugins: {
       legend: {
+        // Leaves the top-right corner for the Win % / cp toggle
+        align: "start",
         onClick: () => {
           setChartSettings("fixYAxis", !chartSettings.fixYAxis);
         },
       },
+      tooltip: { callbacks: {} },
     },
     tension: 0.3,
     pointRadius: 2,
@@ -266,14 +366,14 @@ function updateChart() {
   let scores = game.moves.map((move, i) => {
     return {
       ply: i + game.openingMoves.length,
-      score: winningProbability(move.uciInfo),
+      score: plottedEvaluation(move.uciInfo),
     };
   });
 
   if (game.currentMoveUciInfo) {
     scores.push({
       ply: scores.length + game.openingMoves.length,
-      score: winningProbability(game.currentMoveUciInfo),
+      score: plottedEvaluation(game.currentMoveUciInfo),
     });
   }
 
@@ -294,7 +394,9 @@ function updateChart() {
       },
       {
         label: `${formatName(game.blackPlayer)}'s evaluation`,
-        data: scores.map(({ ply, score }) => (ply % 2 === 1 ? -score : null)),
+        data: scores.map(({ ply, score }) =>
+          ply % 2 === 1 && score !== null ? -score : null,
+        ),
         spanGaps: true,
         borderColor: player2LineColor,
         backgroundColor: player2FillColor,
@@ -308,6 +410,25 @@ function updateChart() {
   };
   chart.update();
 }
+
+// Win % / cp toggle
+const evalModeToggle = document.getElementById("eval-mode");
+
+function updateEvalModeToggle() {
+  const mode = isCentipawnMode() ? "cp" : "winrate";
+  evalModeToggle.querySelectorAll("button").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+  });
+}
+
+evalModeToggle.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-mode]");
+  if (button && button.dataset.mode !== (chartSettings.evalMode ?? "winrate")) {
+    setChartSettings("evalMode", button.dataset.mode);
+  }
+});
+updateEvalModeToggle();
+applyYAxis();
 
 function resizeChart() {
   chart.resize(chartContainer.offsetWidth, chartContainer.offsetHeight);
