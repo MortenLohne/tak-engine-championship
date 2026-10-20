@@ -11,9 +11,50 @@ export function fullMoves(plies) {
   return Math.ceil(plies / 2);
 }
 
+// Engine names as shown elsewhere on the page
+function formatName(name) {
+  return typeof name === "string" ? name.trim() : "";
+}
+
+// What identifies the match a game state belongs to, copied so that later
+// patches to the state don't change it
+export function matchInfo(state) {
+  return {
+    engines: Array.isArray(state?.engines) ? [...state.engines] : null,
+    resultCount: Array.isArray(state?.results) ? state.results.length : null,
+  };
+}
+
+// Whether `next` (from matchInfo) is a different match from `previous`, as
+// after Racetrack restarts with another match: the engines changed, or the
+// results list got shorter
+export function isNewMatch(previous, next) {
+  if (!previous || !next) return false;
+  if (JSON.stringify(previous.engines) !== JSON.stringify(next.engines))
+    return true;
+  return (
+    previous.resultCount !== null &&
+    next.resultCount !== null &&
+    next.resultCount < previous.resultCount
+  );
+}
+
+// The results entry for `round`, if any
+export function findResult(results, round) {
+  if (!Array.isArray(results)) return null;
+  return results.find((g) => g.roundNumber === round) ?? null;
+}
+
+// The PTN `[Result]` value for a finished game's result, or null for an
+// unfinished one (`*`) or a missing result
+export function ptnResult(result) {
+  const r = String(result ?? "").trim();
+  return r && r !== "*" ? r : null;
+}
+
 export function buildResultsModel({ engines, results, totalRounds, live }) {
   if (!Array.isArray(results)) return null;
-  const names = Array.isArray(engines) ? engines : [];
+  const names = Array.isArray(engines) ? engines.map(formatName) : [];
   const twoEngines = names.length === 2;
   const sorted = [...results].sort((x, y) => x.roundNumber - y.roundNumber);
 

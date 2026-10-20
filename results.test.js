@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildResultsModel, fullMoves, resultWinner } from "./results.js";
+import {
+  buildResultsModel,
+  findResult,
+  fullMoves,
+  isNewMatch,
+  matchInfo,
+  ptnResult,
+  resultWinner,
+} from "./results.js";
 
 const engines = ["syntaks", "takzero"];
 const row = (roundNumber, whiteEngine, blackEngine, result, plies = 40) => ({
@@ -167,4 +175,55 @@ test("no results", () => {
     buildResultsModel({ engines, results: undefined, live: null }),
     null,
   );
+});
+
+test("trims engine names like the live row", () => {
+  const m = buildResultsModel({
+    engines: [" syntaks ", "takzero\n"],
+    results: [row(1, 0, 1, "R-0"), row(2, 1, 0, "0-R")],
+    live: null,
+  });
+  assert.deepEqual(m.names, ["syntaks", "takzero"]);
+  assert.equal(m.games[0].white, "syntaks");
+  assert.equal(m.games[0].black, "takzero");
+  assert.equal(m.games[1].white, "takzero");
+});
+
+test("matchInfo copies the engines", () => {
+  const state = { engines: ["a", "b"], results: [row(1, 0, 1, "R-0")] };
+  const info = matchInfo(state);
+  state.engines[0] = "c";
+  state.results.push(row(2, 1, 0, "0-R"));
+  assert.deepEqual(info, { engines: ["a", "b"], resultCount: 1 });
+  assert.deepEqual(matchInfo({}), { engines: null, resultCount: null });
+});
+
+test("isNewMatch", () => {
+  const info = (engines, n) =>
+    matchInfo({
+      engines,
+      results: Array.from({ length: n }, (_, i) => row(i + 1, 0, 1, "R-0")),
+    });
+  assert.equal(isNewMatch(null, info(engines, 0)), false);
+  assert.equal(isNewMatch(info(engines, 2), info(engines, 2)), false);
+  assert.equal(isNewMatch(info(engines, 2), info(engines, 3)), false);
+  // Results got shorter: a restart with the same engines
+  assert.equal(isNewMatch(info(engines, 3), info(engines, 1)), true);
+  assert.equal(isNewMatch(info(engines, 3), info(["a", "b"], 3)), true);
+  assert.equal(
+    isNewMatch(info(engines, 1), info([...engines].reverse(), 1)),
+    true,
+  );
+  // A server without results or engines
+  assert.equal(isNewMatch(matchInfo({}), matchInfo({})), false);
+});
+
+test("findResult and ptnResult", () => {
+  const results = [row(1, 0, 1, "R-0"), row(2, 1, 0, "0-F")];
+  assert.equal(findResult(results, 2).result, "0-F");
+  assert.equal(findResult(results, 3), null);
+  assert.equal(findResult(undefined, 1), null);
+  for (const r of ["R-0", "0-F", "1-0", "1/2-1/2"])
+    assert.equal(ptnResult(r), r);
+  for (const r of ["*", "", null, undefined]) assert.equal(ptnResult(r), null);
 });

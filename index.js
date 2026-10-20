@@ -1,19 +1,34 @@
 import { applyPatch } from "https://esm.sh/fast-json-patch@3.1.1";
 import Chart from "https://esm.sh/chart.js@4.5.0/auto";
-import { buildResultsModel } from "./results.js";
+import {
+  buildResultsModel,
+  findResult,
+  isNewMatch,
+  matchInfo,
+  ptnResult,
+} from "./results.js";
 import { createResultsPanel } from "./results-panel.js";
 
 const urlParams = new URLSearchParams(window.location.search);
 
 // const SERVER_URL = "http://192.168.1.2:23456";
-// `?server=<url>` overrides it, for local testing
+// `?server=<url>` overrides it, for local testing: only with `?debug` or on a
+// local page, so that a link to the public site can't show another server
+const isLocalPage = ["localhost", "127.0.0.1"].includes(
+  window.location.hostname,
+);
+const serverOverride =
+  urlParams.has("debug") || isLocalPage ? urlParams.get("server") : null;
 const SERVER_URL = (
-  urlParams.get("server") || "https://racetrack.mortenlohne.no"
+  serverOverride || "https://racetrack.mortenlohne.no"
 ).replace(/\/+$/, "");
 
 let gameState = null;
 let viewedGame = null; // The finished game shown in place of the live one
 const finishedGames = new Map(); // Finished games by round number
+let finishedGamesGeneration = 0; // Bumped when the cache is cleared
+let lastMatch = null; // matchInfo() of the last state, kept across reconnects
+let reconnected = false; // Whether the stream reconnected since the last state
 let finishedGameRequest = 0; // Latest showFinishedGame call, to drop stale loads
 let roundNumber = 0;
 let moveCount = 0;
@@ -743,9 +758,28 @@ async function fetchLoop() {
     document.getElementById("loading").style.display = "none";
     const patch = JSON.parse(event.data);
     gameState = applyPatch(gameState, patch).newDocument;
-    if (gameState !== null) {
-      updateGameState();
+    if (gameState === null) {
+      return;
     }
+    const match = matchInfo(gameState);
+    const newMatch = isNewMatch(lastMatch, match);
+    const checkViewed = newMatch || reconnected;
+    lastMatch = match;
+    reconnected = false;
+    if (newMatch) {
+      // Same round numbers, different games
+      clearFinishedGames();
+    }
+    if (
+      viewedGame &&
+      checkViewed &&
+      (newMatch || !findResult(gameState.results, viewedGame.roundNumber))
+    ) {
+      // The viewed game is from another match, or no longer listed
+      showLiveGame(); // Also updates from the new state
+      return;
+    }
+    updateGameState();
   };
 
   evtSource.onerror = (error) => {
@@ -754,10 +788,18 @@ async function fetchLoop() {
       "Lost connection to the server, reconnecting...";
     console.error("Connection error: ", error);
     gameState = null;
+    // Racetrack may have restarted with another match
+    reconnected = true;
+    clearFinishedGames();
     sendToNinja("SET_TIMER_LIVE", false);
     evtSource.close();
     window.setTimeout(fetchLoop, 2000);
   };
+}
+
+function clearFinishedGames() {
+  finishedGames.clear();
+  finishedGamesGeneration++;
 }
 
 function shownGame() {
@@ -765,7 +807,7 @@ function shownGame() {
 }
 
 // Shows `game` in PTN Ninja from its start, with its notes and clocks
-function loadGameIntoNinja(game, { live }) {
+function loadGameIntoNinja(game, { live, result = null }) {
   let ptn = `[TPS "${game.openingTps}"]`;
   ptn += `\n[Player1 "${formatName(game.whitePlayer)}"]`;
   ptn += `\n[Player2 "${formatName(game.blackPlayer)}"]`;
@@ -773,6 +815,9 @@ function loadGameIntoNinja(game, { live }) {
   ptn += `\n[Site "Racetrack"]`;
   ptn += `\n[Round "${game.roundNumber}"]`;
   ptn += `\n[Komi "${Number(game.halfKomi) / 2}"]`;
+  if (result) {
+    ptn += `\n[Result "${result}"]`;
+  }
   ptn +=
     " " +
     game.openingMoves.concat(game.moves.map(({ move }) => move)).join(" ");
@@ -839,7 +884,13 @@ function updateGameState() {
 const viewingNotificationId = "viewing-finished-game";
 
 async function showFinishedGame(round) {
-  const request = ++finishedGameRequest;
+  const request = ++finishedGameRequest; // Also drops any other game loading
+  if (viewedGame?.roundNumber === round) {
+    // Already shown: don't reload it
+    updateResults();
+    return;
+  }
+  const generation = finishedGamesGeneration;
   let game = finishedGames.get(round);
   if (!game) {
     try {
@@ -855,7 +906,9 @@ async function showFinishedGame(round) {
       }
       return;
     }
-    finishedGames.set(round, game);
+    if (generation === finishedGamesGeneration) {
+      finishedGames.set(round, game);
+    }
   }
   if (request !== finishedGameRequest) {
     // Another game, or the live one, was chosen in the meantime
@@ -863,7 +916,11 @@ async function showFinishedGame(round) {
   }
 
   viewedGame = game;
-  loadGameIntoNinja(game, { live: false });
+  loadGameIntoNinja(game, {
+    live: false,
+    // Time and forfeit wins can't be told from the moves
+    result: ptnResult(findResult(gameState?.results, round)?.result),
+  });
   updateChart();
   sendToNinja("NOTIFY", {
     id: viewingNotificationId,
