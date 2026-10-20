@@ -1,15 +1,68 @@
 import { applyPatch } from "https://esm.sh/fast-json-patch@3.1.1";
 import Chart from "https://esm.sh/chart.js@4.5.0/auto";
+import {
+  buildResultsModel,
+  centipieces,
+  durationMs,
+  findResult,
+  isMatchOver,
+  isNewMatch,
+  matchInfo,
+  clockNote,
+  MATE_CP,
+  ptnClock,
+  ptnResult,
+  symlog,
+  symlogInverse,
+} from "./results.js";
+import { createResultsPanel } from "./results-panel.js";
 
-// const SERVER_URL = "http://192.168.1.2:23456";
-const SERVER_URL = "https://racetrack.mortenlohne.no";
+const urlParams = new URLSearchParams(window.location.search);
+
+// `?server=<url>` points the viewer at another Racetrack server
+function serverUrl() {
+  const fallback = "https://racetrack.mortenlohne.no";
+  const param = urlParams.get("server");
+  if (!param) {
+    return fallback;
+  }
+  try {
+    const url = new URL(param.trim());
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return param.trim().replace(/\/+$/, "");
+    }
+  } catch {}
+  return fallback;
+}
+const SERVER_URL = serverUrl();
 
 let gameState = null;
+let viewedGame = null; // The finished game shown in place of the live one
+const finishedGames = new Map(); // Finished games by round number
+let finishedGamesGeneration = 0; // Bumped when the cache is cleared
+let lastMatch = null; // matchInfo() of the last state, kept across reconnects
+let reconnected = false; // Whether the stream reconnected since the last state
+let finishedGameRequest = 0; // Latest showFinishedGame call, to drop stale loads
 let roundNumber = 0;
 let moveCount = 0;
-let previousGame = null;
+// Whether PTN Ninja has the live game as it was played, plies appended to it
+// (also while staying on it after it ended), rather than a loaded finished game
+let ninjaHasLiveGame = false;
+// The round of each APPEND_PLY sent, until PTN Ninja reports appending it
+let sentAppends = [];
+// The round of the ply PTN Ninja last reported appending, if it was one of
+// ours: what a GAME_END that follows is about
+let lastAppendedRound = null;
+// Whether PTN Ninja hasn't yet reported going to the last ply of the game
+// last loaded, so its game state may still be of an earlier game
+let awaitingNinjaLast = false;
+const endNotifiedRounds = new Set(); // Rounds with a "Game N ended" notification
+// "Game N ended" notifications waiting for PTN Ninja's GET_URL reply, in order
+const pendingEndNotifications = [];
+// A copy of the live state from before the round last changed: the game that
+// just ended, until Racetrack's record of it is loaded
+let previousLiveState = null;
 let savedNotePlies = new Set(); // Track plies with final notes saved
-let livePv = { ply: null, pv: [] }; // Last complete PV seen for the ply being searched
 
 let ninjaGameState = null;
 let theme = null;
@@ -82,18 +135,73 @@ if (chartSettings) {
     fixYAxis: false,
   };
 }
+// "winrate" (the default) or "cp"
+const isCentipieceMode = () => chartSettings.evalMode === "cp";
+
 function setChartSettings(key, value) {
   chartSettings[key] = value;
   localStorage.setItem(chartSettingsStorageKey, JSON.stringify(chartSettings));
-  const scale = chartSettings.fixYAxis ? 100 : 10;
-  chart.config.options.scales.y.suggestedMax = scale;
-  chart.config.options.scales.y.suggestedMin = -scale;
+  applyYAxis();
+  updateChart();
+  updateChartToggles();
+}
+
+// Centipiece axis ticks at round values, placed on the symlog scale
+const CP_TICKS = [100, 300, 1000, 3000, 10000];
+
+function formatCentipieces(cp) {
+  if (Math.abs(cp) >= MATE_CP) {
+    return cp > 0 ? "+Mate" : "−Mate";
+  }
+  const rounded = Math.round(cp);
+  return rounded > 0 ? `+${rounded}` : String(rounded).replace("-", "−");
+}
+
+function applyYAxis() {
+  const y = chart.config.options.scales.y;
+  const tooltip = chart.config.options.plugins.tooltip;
+  if (isCentipieceMode()) {
+    const limit = symlog(chartSettings.fixYAxis ? MATE_CP : 300);
+    y.suggestedMin = -limit;
+    y.suggestedMax = limit;
+    y.afterBuildTicks = (scale) => {
+      const values = [0, MATE_CP, ...CP_TICKS]
+        .flatMap((cp) => (cp ? [cp, -cp] : [cp]))
+        .map(symlog)
+        .filter((v) => v >= scale.min - 1e-9 && v <= scale.max + 1e-9)
+        .sort((a, b) => a - b);
+      scale.ticks = values.map((value) => ({ value }));
+    };
+    y.ticks.callback = (value) => formatCentipieces(symlogInverse(value));
+    tooltip.callbacks = {
+      label: (context) =>
+        `${context.dataset.label}: ${formatCentipieces(
+          symlogInverse(context.parsed.y),
+        )}`,
+    };
+  } else {
+    const scale = chartSettings.fixYAxis ? 100 : 10;
+    y.suggestedMin = -scale;
+    y.suggestedMax = scale;
+    delete y.afterBuildTicks;
+    delete y.ticks.callback;
+    tooltip.callbacks = {};
+  }
   chart.update();
+}
+
+// The value plotted for one engine report, from that engine's point of view
+function plottedEvaluation(uciInfo) {
+  if (isCentipieceMode()) {
+    const cp = centipieces(uciInfo);
+    return cp === null ? null : symlog(cp);
+  }
+  return winningProbability(uciInfo);
 }
 
 //#region Chart initialization
 
-const chartContainer = document.getElementById("chart-wrapper");
+const chartContainer = document.getElementById("chart-area");
 
 const verticalLinePlugin = {
   getLinePosition(chart, pointIndex) {
@@ -126,6 +234,31 @@ const verticalLinePlugin = {
   },
 };
 
+// Keeps the legend clear of the Win % / cp toggle in the top-right corner
+const evalModeLayoutPlugin = {
+  id: "evalModeLayout",
+  afterLayout(chart) {
+    const toggle = document.getElementById("chart-controls");
+    // Item positions aren't set until the legend draws; row widths are
+    const rows = chart.legend?.lineWidths ?? [];
+    let changed = false;
+    if (toggle && rows.length) {
+      const legendRight = chart.legend.left + Math.max(...rows);
+      const toggleLeft = chart.width - toggle.offsetWidth - 12;
+      const top = legendRight > toggleLeft ? toggle.offsetHeight + 6 : 0;
+      const padding = chart.options.layout.padding;
+      if ((padding?.top ?? 0) !== top) {
+        chart.options.layout.padding = { top };
+        changed = true;
+      }
+    }
+    if (changed) {
+      // Re-run layout with the new padding once this one has finished
+      requestAnimationFrame(() => chart.update());
+    }
+  },
+};
+
 const chart = new Chart(document.getElementById("chart"), {
   type: "line",
   data: {
@@ -133,7 +266,7 @@ const chart = new Chart(document.getElementById("chart"), {
     datasets: [],
   },
   lineAtIndex: null,
-  plugins: [verticalLinePlugin],
+  plugins: [verticalLinePlugin, evalModeLayoutPlugin],
   options: {
     animations: false,
     maintainAspectRatio: false,
@@ -149,17 +282,19 @@ const chart = new Chart(document.getElementById("chart"), {
       if (isLastNode) {
         sendToNinja("LAST");
       } else {
-        const plyID = dataIndex + gameState.openingMoves.length;
+        const plyID = dataIndex + shownGame().openingMoves.length;
         sendToNinja("GO_TO_PLY", { plyID, isDone: false });
       }
       ninja.focus();
     },
     plugins: {
       legend: {
-        onClick: () => {
-          setChartSettings("fixYAxis", !chartSettings.fixYAxis);
-        },
+        // Leaves the top-right corner for the chart toggles
+        align: "start",
+        // The scale toggles are buttons now; don't hide a player's line
+        onClick: () => {},
       },
+      tooltip: { callbacks: {} },
     },
     tension: 0.3,
     pointRadius: 2,
@@ -210,21 +345,22 @@ const player2FillColor = () =>
 //#region Chart sync
 
 function updateChart() {
-  if (!gameState) {
+  const game = shownGame();
+  if (!game) {
     return;
   }
 
-  let scores = gameState.moves.map((move, i) => {
+  let scores = game.moves.map((move, i) => {
     return {
-      ply: i + gameState.openingMoves.length,
-      score: winningProbability(move.uciInfo),
+      ply: i + game.openingMoves.length,
+      score: plottedEvaluation(move.uciInfo),
     };
   });
 
-  if (gameState.currentMoveUciInfo) {
+  if (game.currentMoveUciInfo) {
     scores.push({
-      ply: scores.length + gameState.openingMoves.length,
-      score: winningProbability(gameState.currentMoveUciInfo),
+      ply: scores.length + game.openingMoves.length,
+      score: plottedEvaluation(game.currentMoveUciInfo),
     });
   }
 
@@ -232,7 +368,7 @@ function updateChart() {
     labels: scores.map((row) => 1 + row.ply / 2),
     datasets: [
       {
-        label: `${formatName(gameState.whitePlayer)}'s evaluation`,
+        label: `${formatName(game.whitePlayer)}'s evaluation`,
         data: scores.map(({ ply, score }) => (ply % 2 === 0 ? score : null)),
         spanGaps: true,
         borderColor: player1LineColor,
@@ -244,8 +380,10 @@ function updateChart() {
         },
       },
       {
-        label: `${formatName(gameState.blackPlayer)}'s evaluation`,
-        data: scores.map(({ ply, score }) => (ply % 2 === 1 ? -score : null)),
+        label: `${formatName(game.blackPlayer)}'s evaluation`,
+        data: scores.map(({ ply, score }) =>
+          ply % 2 === 1 && score !== null ? -score : null,
+        ),
         spanGaps: true,
         borderColor: player2LineColor,
         backgroundColor: player2FillColor,
@@ -260,20 +398,59 @@ function updateChart() {
   chart.update();
 }
 
+// Chart toggles: each button group shows and sets one chart setting
+const chartToggles = [
+  {
+    element: document.getElementById("axis-range"),
+    current: () => (chartSettings.fixYAxis ? "full" : "fit"),
+    set: (value) => setChartSettings("fixYAxis", value === "full"),
+  },
+  {
+    element: document.getElementById("eval-mode"),
+    current: () => (isCentipieceMode() ? "cp" : "winrate"),
+    set: (value) => setChartSettings("evalMode", value),
+  },
+];
+
+function updateChartToggles() {
+  chartToggles.forEach(({ element, current }) => {
+    const value = current();
+    element.querySelectorAll("button").forEach((button) => {
+      button.setAttribute(
+        "aria-pressed",
+        String(button.dataset.value === value),
+      );
+    });
+  });
+}
+
+chartToggles.forEach((toggle) => {
+  toggle.element.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-value]");
+    if (button && button.dataset.value !== toggle.current()) {
+      toggle.set(button.dataset.value);
+    }
+  });
+});
+updateChartToggles();
+applyYAxis();
+
 function resizeChart() {
   chart.resize(chartContainer.offsetWidth, chartContainer.offsetHeight);
 }
 resizeChart();
-window.addEventListener("resize", resizeChart);
+// Also follows the results list opening and closing above the chart
+new ResizeObserver(resizeChart).observe(chartContainer);
 
 function updateChartVerticalLine(plyID = null, plyIsDone = true) {
+  const game = shownGame();
   let lineAtIndex = null;
-  if (gameState && plyID !== null) {
+  if (game && plyID !== null) {
     // plyID from PTN Ninja: position in the game
     // Chart data[i] corresponds to gameState.moves[i]
     // When plyIsDone=true: we're viewing the result of move plyID, so lineAtIndex = plyID - openingMoves.length + 1
     // When plyIsDone=false: we're before the move, so lineAtIndex = plyID - openingMoves.length
-    lineAtIndex = plyID - gameState.openingMoves.length + (plyIsDone ? 1 : 0);
+    lineAtIndex = plyID - game.openingMoves.length + (plyIsDone ? 1 : 0);
     if (lineAtIndex < 0) {
       lineAtIndex = 0;
     }
@@ -292,37 +469,98 @@ function updateTheme(newTheme) {
       : themeColors.textDark
     : "";
 
+  // PTN Ninja's header and toolbars: the `ui` colour, with light text when
+  // it's dark (`isDark` is computed from `ui`)
+  const headerTextColor = theme
+    ? theme.isDark
+      ? themeColors.textLight
+      : themeColors.textDark
+    : "";
+
+  // Text on the primary colour, as PTN Ninja picks it
+  const accentTextColor = theme
+    ? theme.primaryDark
+      ? themeColors.textLight
+      : themeColors.textDark
+    : "";
+
   document.body.style.background = themeColors.bg || "";
-  chartContainer.style.background = themeColors.panel || "";
+  document.getElementById("chart-wrapper").style.background =
+    themeColors.panel || "";
+  const resultsColors = {
+    "--results-bg": themeColors.bg,
+    "--results-panel": themeColors.panel,
+    "--results-text": textColor,
+    "--results-header-bg": themeColors.ui,
+    "--results-header-text": headerTextColor,
+    "--results-p1": themeColors.player1,
+    "--results-p2": themeColors.player2,
+    "--results-accent": themeColors.primary,
+    "--results-accent-text": accentTextColor,
+  };
+  Object.entries(resultsColors).forEach(([name, value]) => {
+    if (value) {
+      document.documentElement.style.setProperty(name, value);
+    } else {
+      document.documentElement.style.removeProperty(name);
+    }
+  });
   Chart.defaults.color = textColor;
   chart.update();
 }
 
-//#region Clock sync
+//#region Match results
 
-// Convert a serde-serialized std::time::Duration ({ secs, nanos }) to ms
-function durationToMs(duration) {
-  if (!duration || typeof duration !== "object") {
-    return null;
-  }
-  const secs = Number(duration.secs);
-  const nanos = Number(duration.nanos);
-  if (!Number.isFinite(secs) || !Number.isFinite(nanos)) {
-    return null;
-  }
-  return secs * 1000 + Math.round(nanos / 1e6);
-}
+const resultsPanel = createResultsPanel(document.getElementById("results"), {
+  onSelect: (round) => {
+    if (round === null) {
+      showLiveGame();
+    } else {
+      showFinishedGame(round);
+    }
+  },
+});
 
-function sendClocks(isLive) {
+// Once the last game has ended there's no live game to go back to
+let matchOverHandled = false;
+
+function updateResults() {
   if (!gameState) {
     return;
   }
-  const time1 = durationToMs(gameState.whiteTimeLeft);
-  const time2 = durationToMs(gameState.blackTimeLeft);
+  if (isMatchOver(gameState) && !matchOverHandled) {
+    matchOverHandled = true;
+    sendToNinja("DISMISS_NOTIFY", { id: viewingNotificationId });
+  }
+  resultsPanel.update(
+    buildResultsModel({
+      engines: gameState.engines,
+      results: gameState.results,
+      totalRounds: gameState.totalRounds,
+      live: {
+        roundNumber: gameState.roundNumber,
+        whitePlayer: formatName(gameState.whitePlayer),
+        blackPlayer: formatName(gameState.blackPlayer),
+        plies: gameState.openingMoves.length + gameState.moves.length,
+      },
+    }),
+    viewedGame?.roundNumber ?? null,
+  );
+}
+
+//#region Clock sync
+
+function sendClocks(isLive) {
+  const game = shownGame();
+  if (!game) {
+    return;
+  }
+  const time1 = durationMs(game.whiteTimeLeft);
+  const time2 = durationMs(game.blackTimeLeft);
   if (time1 === null || time2 === null) {
     return;
   }
-  const ply = gameState.openingMoves.length + gameState.moves.length;
+  const ply = game.openingMoves.length + game.moves.length;
   const timerTurn = ply % 2 === 0 ? 1 : 2;
   sendToNinja("SET_GAME_TIME", {
     time1,
@@ -340,30 +578,6 @@ function formatName(name) {
     return "";
   }
   return name.trim();
-}
-
-// Syntaks reports aspiration-window fail-high/low results with a truncated PV
-// (often just the root move), and Racetrack doesn't forward the bound flag.
-// While the reported PV is a prefix of the last complete one, keep the latter.
-function pvWithContinuation(pv, ply) {
-  pv = toPvArray(pv);
-  if (
-    livePv.ply === ply &&
-    pv.length < livePv.pv.length &&
-    pv.every((move, i) => move === livePv.pv[i])
-  ) {
-    return livePv.pv;
-  }
-  return pv;
-}
-
-function trackLivePv() {
-  const uciInfo = gameState.currentMoveUciInfo;
-  if (!uciInfo) {
-    return;
-  }
-  const ply = gameState.openingMoves.length + gameState.moves.length;
-  livePv = { ply, pv: pvWithContinuation(uciInfo.pv, ply) };
 }
 
 function toPvArray(pv) {
@@ -662,10 +876,40 @@ async function fetchLoop() {
   evtSource.onmessage = (event) => {
     document.getElementById("loading").style.display = "none";
     const patch = JSON.parse(event.data);
-    gameState = applyPatch(gameState, patch).newDocument;
-    if (gameState !== null) {
-      updateGameState();
+    if (
+      gameState &&
+      patch.some((op) => op.path === "" || op.path === "/roundNumber")
+    ) {
+      // applyPatch changes the state in place
+      previousLiveState = structuredClone(gameState);
     }
+    gameState = applyPatch(gameState, patch).newDocument;
+    if (gameState === null) {
+      return;
+    }
+    const match = matchInfo(gameState);
+    const newMatch = isNewMatch(lastMatch, match);
+    const checkViewed = newMatch || reconnected;
+    lastMatch = match;
+    reconnected = false;
+    if (newMatch) {
+      // Same round numbers, different games
+      clearFinishedGames();
+      endNotifiedRounds.clear();
+      matchOverHandled = false;
+      previousLiveState = null; // Don't stay on a game from the old match
+      roundNumber = 0; // Nor notify that the old match's game ended
+    }
+    if (
+      viewedGame &&
+      checkViewed &&
+      (newMatch || !findResult(gameState.results, viewedGame.roundNumber))
+    ) {
+      // The viewed game is from another match, or no longer listed
+      showLiveGame(); // Also updates from the new state
+      return;
+    }
+    updateGameState();
   };
 
   evtSource.onerror = (error) => {
@@ -674,95 +918,363 @@ async function fetchLoop() {
       "Lost connection to the server, reconnecting...";
     console.error("Connection error: ", error);
     gameState = null;
+    // Racetrack may have restarted with another match
+    reconnected = true;
+    clearFinishedGames();
+    endNotifiedRounds.clear();
     sendToNinja("SET_TIMER_LIVE", false);
     evtSource.close();
     window.setTimeout(fetchLoop, 2000);
   };
 }
 
+function clearFinishedGames() {
+  finishedGames.clear();
+  finishedGamesGeneration++;
+}
+
+function shownGame() {
+  return viewedGame ?? gameState;
+}
+
+// Shows `game` in PTN Ninja from its start, with its notes and clocks
+function loadGameIntoNinja(game, { live, result = null }) {
+  let ptn = `[TPS "${game.openingTps}"]`;
+  ptn += `\n[Player1 "${formatName(game.whitePlayer)}"]`;
+  ptn += `\n[Player2 "${formatName(game.blackPlayer)}"]`;
+  ptn += `\n[Size "${game.size}"]`;
+  ptn += `\n[Site "Racetrack"]`;
+  ptn += `\n[Round "${game.roundNumber}"]`;
+  ptn += `\n[Komi "${Number(game.halfKomi) / 2}"]`;
+  const clock = ptnClock(game);
+  if (clock) {
+    ptn += `\n[Clock "${clock}"]`;
+  }
+  if (result) {
+    ptn += `\n[Result "${result}"]`;
+  }
+  ptn +=
+    " " +
+    game.openingMoves.concat(game.moves.map(({ move }) => move)).join(" ");
+  if (result) {
+    // Also after the last move, as PTN has it: PTN Ninja only shows a result
+    // there, and can't tell time or forfeit wins from the position
+    ptn += ` ${result}`;
+  }
+
+  sendToNinja("SET_NAME", `Tak Engine Championship: Game ${game.roundNumber}`);
+  sendToNinja("SET_CURRENT_PTN", ptn);
+  ninjaHasLiveGame = live;
+  awaitingNinjaLast = true;
+  // Plies sent before this aren't in the new game
+  sentAppends = [];
+  lastAppendedRound = null;
+  sendToNinja("LAST");
+  savedNotePlies.clear();
+  saveAnalysisToNotes();
+  sendClocks(live);
+}
+
 function updateGameState() {
+  if (viewedGame) {
+    // Viewing a finished game: the live game keeps updating in the background
+    updateResults();
+    return;
+  }
+
   if (
     roundNumber !== gameState.roundNumber ||
     moveCount > gameState.moves.length
   ) {
+    if (roundNumber !== 0 && roundNumber !== gameState.roundNumber) {
+      // Before loading the next game, while PTN Ninja still has this one
+      notifyRoundEnded(roundNumber);
+    }
+    if (shouldStayOnEndedGame()) {
+      stayOnEndedGame();
+      return;
+    }
     // New game
     roundNumber = gameState.roundNumber;
     moveCount = 0;
-    savedNotePlies.clear();
-    livePv = { ply: null, pv: [] };
-    let ptn = `[TPS "${gameState.openingTps}"]`;
-    ptn += `\n[Player1 "${formatName(gameState.whitePlayer)}"]`;
-    ptn += `\n[Player2 "${formatName(gameState.blackPlayer)}"]`;
-    ptn += `\n[Size "${gameState.size}"]`;
-    ptn += `\n[Site "Racetrack"]`;
-    ptn += `\n[Round "${gameState.roundNumber}"]`;
-    ptn += `\n[Komi "${Number(gameState.halfKomi) / 2}"]`;
-    ptn +=
-      " " +
-      gameState.openingMoves
-        .concat(gameState.moves.map(({ move }) => move))
-        .join(" ");
-
-    sendToNinja("SET_NAME", `Tak Engine Championship: Game ${roundNumber}`);
-    sendToNinja("SET_CURRENT_PTN", ptn);
-    sendToNinja("LAST");
-    saveAnalysisToNotes();
-    trackLivePv();
-    sendClocks(true);
+    loadGameIntoNinja(gameState, { live: true });
     moveCount = gameState.moves.length;
   } else if (moveCount < gameState.moves.length) {
     // New move(s)
     gameState.moves.slice(moveCount).forEach((move) => {
-      sendToNinja("APPEND_PLY", move.move);
+      appendPly(roundNumber, move.move);
     });
     saveAnalysisToNotes();
-    trackLivePv();
     sendClocks(true);
     moveCount = gameState.moves.length;
   } else {
     // New analysis
-    trackLivePv();
     setCurrentAnalysis();
   }
 
   // Update the eval chart
   updateChart();
+
+  updateResults();
+}
+
+const viewingNotificationId = "viewing-finished-game";
+
+// The finished game `round` from the cache, or else from Racetrack
+async function fetchFinishedGame(round) {
+  const cached = finishedGames.get(round);
+  if (cached) {
+    return cached;
+  }
+  const generation = finishedGamesGeneration;
+  const response = await fetch(`${SERVER_URL}/games/${round}`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const game = await response.json();
+  if (generation === finishedGamesGeneration) {
+    finishedGames.set(round, game);
+  }
+  return game;
+}
+
+async function showFinishedGame(round) {
+  const request = ++finishedGameRequest; // Also drops any other game loading
+  if (viewedGame?.roundNumber === round) {
+    // Already shown: don't reload it, but retry loading Racetrack's record
+    // of a game that was stayed on when it ended
+    if (!finishedGames.has(round)) {
+      refreshEndedGame(round, request, { reportErrors: true });
+    }
+    updateResults();
+    return;
+  }
+  let game;
+  try {
+    game = await fetchFinishedGame(round);
+  } catch (error) {
+    console.warn(`Couldn't load game ${round}:`, error);
+    if (request === finishedGameRequest) {
+      sendToNinja("NOTIFY_ERROR", `Couldn't load game ${round}`);
+    }
+    return;
+  }
+  if (request !== finishedGameRequest) {
+    // Another game, or the live one, was chosen in the meantime
+    return;
+  }
+
+  viewedGame = game;
+  loadGameIntoNinja(game, {
+    live: false,
+    // Time and forfeit wins can't be told from the moves
+    result: ptnResult(findResult(gameState?.results, round)?.result),
+  });
+  updateChart();
+  notifyViewing(game.roundNumber);
+  updateResults();
+}
+
+function notifyViewing(round) {
+  if (isMatchOver(gameState ?? {})) {
+    return;
+  }
+  sendToNinja("NOTIFY", {
+    id: viewingNotificationId,
+    // Production PTN Ninja ignores `id`; `group` makes it replace the last one
+    group: viewingNotificationId,
+    message: `Viewing game ${round}`,
+    position: "top-right",
+    timeout: 0,
+    actions: [
+      { color: "primary", label: "Back to live", action: "BACK_TO_LIVE" },
+      { icon: "close" },
+    ],
+  });
+}
+
+// Whether the live game just ended (the round changed) while the viewer had
+// stepped back in it, so they should stay on it instead of following the new
+// game
+function shouldStayOnEndedGame() {
+  return (
+    viewedGame === null &&
+    roundNumber !== 0 &&
+    roundNumber !== gameState.roundNumber &&
+    previousLiveState?.roundNumber === roundNumber &&
+    ninjaGameState !== null &&
+    !awaitingNinjaLast &&
+    !ninjaGameState.isAtEndOfMainBranch
+  );
+}
+
+// Keep showing the game that just ended, as a finished game, where the viewer
+// is in it: PTN Ninja already has it, so it isn't reloaded
+function stayOnEndedGame() {
+  const round = roundNumber;
+  const request = ++finishedGameRequest;
+  viewedGame = finishedGames.get(round);
+  if (!viewedGame) {
+    viewedGame = previousLiveState;
+    // Its live analysis is of a position that's no longer being searched
+    viewedGame.currentMoveUciInfo = null;
+  }
+  previousLiveState = null;
+  appendMissingMoves();
+  sendClocks(false);
+  notifyViewing(round);
+  updateChart();
+  updateResults();
+  if (!finishedGames.has(round)) {
+    refreshEndedGame(round, request);
+  }
+}
+
+// Load Racetrack's record of the stayed-on game `round`, which has any final
+// moves and the result the live state missed
+function refreshEndedGame(round, request, { reportErrors = false } = {}) {
+  fetchFinishedGame(round)
+    .then((game) => {
+      if (
+        request !== finishedGameRequest ||
+        viewedGame?.roundNumber !== round
+      ) {
+        return;
+      }
+      viewedGame = game;
+      appendMissingMoves();
+      sendClocks(false);
+      notifyRoundEnded(round);
+      updateChart();
+      updateResults();
+    })
+    .catch((error) => {
+      // Keep the copy of the live state; showing the game again retries
+      console.warn(`Couldn't load game ${round}:`, error);
+      if (reportErrors && request === finishedGameRequest) {
+        sendToNinja("NOTIFY_ERROR", `Couldn't load game ${round}`);
+      }
+    });
+}
+
+function appendPly(round, ply) {
+  sentAppends.push(round);
+  sendToNinja("APPEND_PLY", ply);
+}
+
+// Append the viewed game's moves that PTN Ninja doesn't have yet, if it's
+// still showing that game as it was played live
+function appendMissingMoves() {
+  if (!ninjaHasLiveGame || viewedGame.moves.length <= moveCount) {
+    return;
+  }
+  viewedGame.moves.slice(moveCount).forEach((move) => {
+    appendPly(viewedGame.roundNumber, move.move);
+  });
+  moveCount = viewedGame.moves.length;
+  saveAnalysisToNotes();
+}
+
+// Notify that `round` ended, with its result from Racetrack, unless it was
+// already notified or Racetrack has no result for it yet. PTN Ninja's GAME_END
+// misses some endings: time and forfeit wins, a final move that arrives with
+// the next game, or a viewer who isn't at the last move.
+function notifyRoundEnded(round) {
+  const result = ptnResult(findResult(gameState?.results, round)?.result);
+  if (result) {
+    notifyGameEnded(round, result, null);
+  }
+}
+
+// Notify once per game. `url` is the game's PTN Ninja link, or null to ask
+// PTN Ninja for the link of the game it has now, which must be `round`.
+function notifyGameEnded(round, result, url) {
+  if (endNotifiedRounds.has(round)) {
+    return;
+  }
+  endNotifiedRounds.add(round);
+  const ended = { round, result };
+  if (url) {
+    sendGameEndedNotification(ended, url);
+  } else {
+    pendingEndNotifications.push(ended);
+    sendToNinja("GET_URL");
+  }
+}
+
+function sendGameEndedNotification({ round, result }, url) {
+  sendToNinja("NOTIFY", {
+    // The latest replaces the previous: by `id` where PTN Ninja
+    // supports it, by `group` (and position) on production
+    id: "game-ended",
+    group: "game-ended",
+    icon: "result",
+    message: `Game ${round} ended ${result}`,
+    position: "top-right",
+    actions: [
+      {
+        color: "primary",
+        label: "View",
+        icon: "open_in_new",
+        action: "VIEW_FINISHED_GAME",
+        value: url,
+      },
+      {
+        icon: "close",
+      },
+    ],
+  });
+}
+
+function showLiveGame() {
+  finishedGameRequest++; // Drop any finished game still loading
+  const wasViewing = viewedGame !== null;
+  viewedGame = null;
+  if (!wasViewing) {
+    return;
+  }
+  // A no-op if its own "Back to live" button already closed it
+  sendToNinja("DISMISS_NOTIFY", { id: viewingNotificationId });
+  // Reload the live game from scratch on the next update
+  roundNumber = 0;
+  if (gameState) {
+    updateGameState();
+  }
 }
 
 //#region PTN Ninja sync
 
 function setCurrentAnalysis() {
-  if (!gameState || !ninjaGameState) {
+  const game = shownGame();
+  if (!game || !ninjaGameState) {
     return;
   }
 
-  if (ninjaGameState.isAtEndOfMainBranch && gameState.currentMoveUciInfo) {
+  if (ninjaGameState.isAtEndOfMainBranch && game.currentMoveUciInfo) {
     // At the end of the game - show real-time analysis
     const turn = ninjaGameState.turn;
     const botName =
-      turn === 1
-        ? formatName(gameState.whitePlayer)
-        : formatName(gameState.blackPlayer);
-    const uciInfo = { ...gameState.currentMoveUciInfo, pv: livePv.pv };
+      turn === 1 ? formatName(game.whitePlayer) : formatName(game.blackPlayer);
+    const uciInfo = game.currentMoveUciInfo;
     sendToNinja("SET_ANALYSIS", formatAnalysis(uciInfo, turn, null, botName));
     sendToNinja("SET_EVAL", formatEval(uciInfo, turn));
   } else {
     // Historical position - show saved analysis from moves
-    const openingMoveCount = gameState.openingMoves.length;
+    const openingMoveCount = game.openingMoves.length;
     // plyID = moveIndex + openingMoveCount - 1, so moveIndex = plyID - openingMoveCount + 1
     const moveIndex =
       ninjaGameState.plyID -
       openingMoveCount +
       (ninjaGameState.plyIsDone ? 1 : 0);
 
-    if (moveIndex >= 0 && moveIndex < gameState.moves.length) {
-      const move = gameState.moves[moveIndex];
+    if (moveIndex >= 0 && moveIndex < game.moves.length) {
+      const move = game.moves[moveIndex];
       if (move && move.uciInfo) {
         const turn = ninjaGameState.turn;
         const botName =
           turn === 1
-            ? formatName(gameState.whitePlayer)
-            : formatName(gameState.blackPlayer);
+            ? formatName(game.whitePlayer)
+            : formatName(game.blackPlayer);
         sendToNinja(
           "SET_ANALYSIS",
           formatAnalysis(move.uciInfo, turn, null, botName),
@@ -778,11 +1290,12 @@ function setCurrentAnalysis() {
 }
 
 function saveAnalysisToNotes() {
+  const game = shownGame();
   const notes = {};
-  const openingMoveCount = gameState.openingMoves.length;
+  const openingMoveCount = game.openingMoves.length;
 
   // Save analysis for completed moves (only those not already saved)
-  gameState.moves.forEach((move, i) => {
+  game.moves.forEach((move, i) => {
     const plyID = i + openingMoveCount - 1;
 
     // Skip if already saved
@@ -794,16 +1307,25 @@ function saveAnalysisToNotes() {
     const ply = i + openingMoveCount;
     const turn = ply % 2 === 0 ? 1 : 2;
     const name =
-      turn === 1
-        ? formatName(gameState.whitePlayer)
-        : formatName(gameState.blackPlayer);
+      turn === 1 ? formatName(game.whitePlayer) : formatName(game.blackPlayer);
 
-    // The final info line may itself be a truncated bound result
-    const uciInfo = move.uciInfo && {
-      ...move.uciInfo,
-      pv: pvWithContinuation(move.uciInfo.pv, ply),
-    };
-    notes[plyID] = formatEngineNotes(uciInfo, turn, name);
+    const uciInfo = move.uciInfo;
+    // Engine notes describe the position the engine searched, before its move
+    notes[plyID] = [
+      ...(notes[plyID] ?? []),
+      ...formatEngineNotes(uciInfo, turn, name),
+    ];
+
+    // The mover's remaining time after this move (player 1 makes the even
+    // plies), when the server sends clocks. Unlike the engine notes, it goes
+    // on the move's own ply, as PTN Ninja does for PlayTak games.
+    const clock = clockNote(
+      turn,
+      turn === 1 ? move.whiteTimeLeft : move.blackTimeLeft,
+    );
+    if (clock) {
+      notes[ply] = [...(notes[ply] ?? []), clock];
+    }
     savedNotePlies.add(plyID);
   });
 
@@ -868,32 +1390,49 @@ window.addEventListener(
       case "SET_UI":
         updateNinjaSettings(value);
         break;
-      case "GAME_END":
-        previousGame = {
-          roundNumber,
-          result: value.result,
-        };
-        sendToNinja("SET_TIMER_LIVE", false);
-        sendToNinja("GET_URL");
+      case "LAST":
+        awaitingNinjaLast = false;
         break;
-      case "GET_URL":
-        sendToNinja("NOTIFY", {
-          icon: "result",
-          message: `Game ${previousGame.roundNumber} ended ${previousGame.result.player1}-${previousGame.result.player2}`,
-          position: "top-right",
-          actions: [
-            {
-              color: "primary",
-              label: "View",
-              icon: "open_in_new",
-              action: "VIEW_FINISHED_GAME",
-              value,
-            },
-            {
-              icon: "close",
-            },
-          ],
-        });
+      case "APPEND_PLY":
+        // PTN Ninja reports each ply appended, ours in the order sent; any
+        // other is the viewer's own
+        lastAppendedRound = sentAppends.length ? sentAppends.shift() : null;
+        break;
+      case "INSERT_PLY":
+      case "INSERT_PLIES":
+        lastAppendedRound = null;
+        break;
+      case "GAME_END": {
+        // Follows the report of the ply that ended the game: only trust it
+        // for one of ours, and name that ply's round, even if a newer game
+        // was loaded since
+        const round = lastAppendedRound;
+        lastAppendedRound = null;
+        if (round === null) {
+          break;
+        }
+        if (round === roundNumber) {
+          sendToNinja("SET_TIMER_LIVE", false);
+        }
+        notifyGameEnded(
+          round,
+          `${value.result.player1}-${value.result.player2}`,
+          value.url || null,
+        );
+        break;
+      }
+      case "GET_URL": {
+        if (typeof value !== "string") {
+          break;
+        }
+        const ended = pendingEndNotifications.shift();
+        if (ended) {
+          sendGameEndedNotification(ended, value);
+        }
+        break;
+      }
+      case "BACK_TO_LIVE":
+        showLiveGame();
         break;
       case "VIEW_FINISHED_GAME":
         window.open(value, "_blank");

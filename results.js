@@ -1,0 +1,229 @@
+// Pure view model for the match results strip. No DOM, no imports.
+
+export function resultWinner(result) {
+  const r = String(result ?? "");
+  if (r.endsWith("-0")) return "white";
+  if (r.startsWith("0-")) return "black";
+  return "draw";
+}
+
+export function fullMoves(plies) {
+  return Math.ceil(plies / 2);
+}
+
+// Engine names as shown elsewhere on the page
+function formatName(name) {
+  return typeof name === "string" ? name.trim() : "";
+}
+
+// What identifies the match a game state belongs to, copied so that later
+// patches to the state don't change it
+export function matchInfo(state) {
+  return {
+    engines: Array.isArray(state?.engines) ? [...state.engines] : null,
+    resultCount: Array.isArray(state?.results) ? state.results.length : null,
+  };
+}
+
+// Whether `next` (from matchInfo) is a different match from `previous`, as
+// after Racetrack restarts with another match: the engines changed, or the
+// results list got shorter
+export function isNewMatch(previous, next) {
+  if (!previous || !next) return false;
+  if (JSON.stringify(previous.engines) !== JSON.stringify(next.engines))
+    return true;
+  return (
+    previous.resultCount !== null &&
+    next.resultCount !== null &&
+    next.resultCount < previous.resultCount
+  );
+}
+
+// The results entry for `round`, if any
+export function findResult(results, round) {
+  if (!Array.isArray(results)) return null;
+  return results.find((g) => g.roundNumber === round) ?? null;
+}
+
+// The PTN `[Result]` value for a finished game's result, or null for an
+// unfinished one (`*`) or a missing result
+export function ptnResult(result) {
+  const r = String(result ?? "").trim();
+  return r && r !== "*" ? r : null;
+}
+
+// Mate scores have no centipiece value comparable to the engine's others, so
+// the centipiece graph pins them (and anything beyond) to this cap
+export const MATE_CP = 20000;
+
+// The engine's reported centipiece score, from its own point of view
+export function centipieces(uciInfo) {
+  if (!uciInfo) return null;
+  if (uciInfo.mate != null && Number.isFinite(Number(uciInfo.mate))) {
+    return Number(uciInfo.mate) < 0 ? -MATE_CP : MATE_CP;
+  }
+  const cp = Number(uciInfo.cpScore);
+  if (uciInfo.cpScore == null || !Number.isFinite(cp)) return null;
+  return Math.max(-MATE_CP, Math.min(MATE_CP, cp));
+}
+
+// A symmetric log scale for centipieces: linear-ish near zero, compressed
+// for large advantages, and defined for negative values
+export function symlog(cp) {
+  return Math.sign(cp) * Math.log10(1 + Math.abs(cp) / 100);
+}
+
+export function symlogInverse(y) {
+  return Math.sign(y) * 100 * (10 ** Math.abs(y) - 1);
+}
+
+// Whether every scheduled game has finished. Never true when the number of
+// games isn't known (SPRT, or an older Racetrack without totalRounds).
+export function isMatchOver({ results, totalRounds } = {}) {
+  return (
+    Array.isArray(results) &&
+    Number.isInteger(totalRounds) &&
+    totalRounds > 0 &&
+    results.length >= totalRounds
+  );
+}
+
+export function buildResultsModel({ engines, results, totalRounds, live }) {
+  if (!Array.isArray(results)) return null;
+  const names = Array.isArray(engines) ? engines.map(formatName) : [];
+  const twoEngines = names.length === 2;
+  const sorted = [...results].sort((x, y) => x.roundNumber - y.roundNumber);
+
+  const wins = [0, 0];
+  let draws = 0;
+  const games = sorted.map((g) => {
+    const winner = resultWinner(g.result);
+    if (winner === "draw") {
+      draws++;
+    } else if (twoEngines) {
+      const winnerEngine = winner === "white" ? g.whiteEngine : g.blackEngine;
+      wins[winnerEngine === 0 ? 0 : 1]++;
+    }
+    return {
+      round: g.roundNumber,
+      white: names[g.whiteEngine],
+      black: names[g.blackEngine],
+      result: g.result,
+      moves: fullMoves(g.plies),
+      winner,
+      // The winning side's colour, not the engine's: engines swap sides
+      dot: winner,
+      live: false,
+    };
+  });
+
+  if (
+    live &&
+    live.roundNumber &&
+    !sorted.some((g) => g.roundNumber === live.roundNumber)
+  ) {
+    games.push({
+      round: live.roundNumber,
+      white: live.whitePlayer,
+      black: live.blackPlayer,
+      result: "--",
+      moves: fullMoves(live.plies),
+      winner: null,
+      dot: "live",
+      live: true,
+    });
+  }
+
+  const current = games.length ? games[games.length - 1].round : null;
+  const liveRound = live && live.roundNumber ? live.roundNumber : null;
+  const n = liveRound ?? current;
+  let label = "";
+  if (n != null)
+    label = totalRounds ? `Game ${n} of ${totalRounds}` : `Game ${n}`;
+
+  return {
+    twoEngines,
+    names: twoEngines ? [names[0], names[1]] : null,
+    wins: twoEngines ? wins : [0, 0],
+    draws,
+    games,
+    label,
+  };
+}
+
+// Milliseconds in a serde-serialized std::time::Duration ({ secs, nanos }),
+// or null if it isn't one. A missing field counts as zero.
+export function durationMs(duration) {
+  if (!duration || typeof duration !== "object") return null;
+  const secs = duration.secs ?? 0;
+  const nanos = duration.nanos ?? 0;
+  if (duration.secs == null && duration.nanos == null) return null;
+  if (!Number.isFinite(secs) || !Number.isFinite(nanos)) return null;
+  if (secs < 0 || nanos < 0) return null;
+  return secs * 1000 + Math.round(nanos / 1e6);
+}
+
+// Remaining time as PTN Ninja writes it in clock notes ("M:SS" or "H:MM:SS"):
+// zero-padded minutes and seconds, with trimmed decimal seconds only under a
+// minute. A port of formatClockNoteValue in PTN Ninja's game actions.
+function formatClockNoteValue(ms) {
+  const totalMs = Math.max(0, Math.round(ms));
+  const totalSeconds = Math.floor(totalMs / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = (n) => (n < 10 ? "0" + n : "" + n);
+  let secStr = pad(s);
+  if (totalMs < 60000) {
+    const frac = totalMs % 1000;
+    if (frac) {
+      secStr += "." + String(frac).padStart(3, "0").replace(/0+$/, "");
+    }
+  }
+  return h > 0 ? `${h}:${pad(m)}:${secStr}` : `${m}:${secStr}`;
+}
+
+// PTN Ninja clock note ("clock1:4:32") for a player's remaining time, a
+// serde Duration. player is 1 or 2. Null if the duration is missing or invalid.
+export function clockNote(player, duration) {
+  if (player !== 1 && player !== 2) return null;
+  const ms = durationMs(duration);
+  if (ms === null) return null;
+  return `clock${player}:${formatClockNoteValue(ms)}`;
+}
+
+// Seconds with up to millisecond precision and no trailing zeros
+function formatSeconds(ms) {
+  return String(Number((ms / 1000).toFixed(3)));
+}
+
+// One side's time control as PTN Ninja's Clock tag shows it: "M:SS +I",
+// minutes and seconds of the initial time and the increment in seconds,
+// e.g. "10:00 +5" or "0:10 +0.1"
+export function formatClock(timeMs, incrementMs) {
+  const minutes = Math.floor(timeMs / 60000);
+  const seconds = formatSeconds(timeMs - minutes * 60000);
+  const [whole, fraction] = seconds.split(".");
+  const ss = whole.padStart(2, "0") + (fraction ? `.${fraction}` : "");
+  return `${minutes}:${ss} +${formatSeconds(incrementMs)}`;
+}
+
+// The PTN `[Clock]` value for a game state's time control, or null when
+// Racetrack didn't send one (older versions), it's incomplete, has no initial
+// time, or the sides have different time controls
+export function ptnClock(game) {
+  const whiteTime = durationMs(game?.whiteTime);
+  const whiteIncrement = durationMs(game?.whiteIncrement);
+  const blackTime = durationMs(game?.blackTime);
+  const blackIncrement = durationMs(game?.blackIncrement);
+  if (
+    whiteTime === null ||
+    whiteIncrement === null ||
+    blackTime === null ||
+    blackIncrement === null
+  )
+    return null;
+  if (whiteTime !== blackTime || whiteIncrement !== blackIncrement) return null;
+  if (whiteTime <= 0) return null;
+  return formatClock(whiteTime, whiteIncrement);
+}

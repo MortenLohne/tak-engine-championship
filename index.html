@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -30,8 +30,15 @@
         display: flex;
         justify-content: center;
         align-items: center;
+        /* Above the results header and the list's sticky header */
+        z-index: 10;
         background-color: rgba(0, 0, 0, 0.7);
-        font-family: Roboto, -apple-system, Helvetica Neue, Helvetica, Arial,
+        font-family:
+          Roboto,
+          -apple-system,
+          Helvetica Neue,
+          Helvetica,
+          Arial,
           sans-serif;
         color: white;
       }
@@ -54,6 +61,453 @@
 
       #chart-wrapper {
         box-shadow: 0 7px 9px -7px rgba(0, 0, 0, 0.7) inset;
+        container: chart / size;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #chart-area {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+      }
+
+      /* Chart toggles (scale fit, Win % / centipieces), top-right corner */
+      #chart-controls {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        display: flex;
+        gap: 6px;
+      }
+      .chart-toggle {
+        display: flex;
+        border: 1px solid var(--results-accent);
+        border-radius: 4px;
+        overflow: hidden;
+        font:
+          500 11px/1 Roboto,
+          -apple-system,
+          Helvetica Neue,
+          Helvetica,
+          Arial,
+          sans-serif;
+      }
+      .chart-toggle button {
+        padding: 3px 7px;
+        border: 0;
+        background: transparent;
+        color: var(--results-text);
+        font: inherit;
+        cursor: pointer;
+      }
+      .chart-toggle button[aria-pressed="true"] {
+        background: var(--results-accent);
+        color: var(--results-accent-text);
+        cursor: default;
+      }
+
+      /* Match results strip and game list */
+
+      :root {
+        --results-bg: #fff;
+        --results-panel: #fff;
+        --results-text: #666;
+        --results-p1: #f2f2f2;
+        --results-p2: #222;
+        --results-accent: #4a90d9;
+        --results-accent-text: #fff;
+        --results-header-bg: #fff;
+        --results-header-text: #666;
+        --results-dot-hit: 14px;
+      }
+      @media (pointer: coarse) {
+        :root {
+          --results-dot-hit: 24px;
+        }
+      }
+
+      /*
+       * Colours derived from the foreground and surface they're drawn on:
+       * the panel for the strip and list, PTN Ninja's header colours for the
+       * header
+       */
+      #results,
+      #results .results-header {
+        --results-draw: color-mix(
+          in srgb,
+          var(--results-fg) 50%,
+          var(--results-surface)
+        );
+        --results-line: color-mix(in srgb, var(--results-fg) 18%, transparent);
+        --results-hover: color-mix(in srgb, var(--results-fg) 7%, transparent);
+        --results-badge: color-mix(in srgb, var(--results-fg) 14%, transparent);
+      }
+      #results {
+        --results-fg: var(--results-text);
+        --results-surface: var(--results-panel);
+        flex: none;
+        container: results / inline-size;
+        color: var(--results-fg);
+        font-family:
+          Roboto,
+          -apple-system,
+          Helvetica Neue,
+          Helvetica,
+          Arial,
+          sans-serif;
+        font-size: 12px;
+        line-height: 1.3;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #results[hidden] {
+        display: none;
+      }
+
+      /*
+       * The names and counts, like PTN Ninja's header (a 50px q-toolbar in an
+       * elevated q-header): its colours, height and shadow, which only falls
+       * below it
+       */
+      .results-header {
+        cursor: pointer;
+        --results-fg: var(--results-header-text);
+        --results-surface: var(--results-header-bg);
+        position: relative;
+        z-index: 2;
+        box-sizing: border-box;
+        height: 50px;
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        color: var(--results-fg);
+        /* The header colour can be translucent: lay it over the page background */
+        background:
+          linear-gradient(var(--results-surface), var(--results-surface)),
+          var(--results-bg);
+        box-shadow:
+          0 7px 9px -7px rgba(0, 0, 0, 0.7) inset,
+          0 0 10px 2px rgba(0, 0, 0, 0.2),
+          0 0 10px rgba(0, 0, 0, 0.24);
+        clip-path: inset(0 0 -20px 0);
+        font-size: 14px;
+      }
+      #results.results-multi .results-header {
+        display: none;
+      }
+
+      /* The dots and caret, on the panel: toggles the list */
+      .results-strip {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 4px 6px 8px;
+        cursor: pointer;
+      }
+      .results-strip:focus-visible {
+        outline: 2px solid var(--results-accent);
+        outline-offset: -2px;
+      }
+      .results-score {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 6px;
+        white-space: nowrap;
+      }
+      .results-side {
+        display: flex;
+        align-items: baseline;
+        gap: 4px;
+        min-width: 0;
+      }
+      .results-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .results-wins {
+        flex: none;
+        font-size: 16px;
+      }
+      .results-draws {
+        flex: none;
+        opacity: 0.75;
+      }
+      /* Pill badges set the counts apart from (versioned) engine names */
+      .results-count {
+        display: inline-block;
+        flex: none;
+        box-sizing: border-box;
+        min-width: 1.6em;
+        padding: 0 0.45em;
+        border-radius: 999px;
+        background: var(--results-badge);
+        line-height: 1.35;
+        text-align: center;
+      }
+
+      .results-row {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: flex-end;
+        gap: 6px;
+      }
+      .results-dots {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-wrap: wrap;
+        max-height: calc(3 * var(--results-dot-hit));
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-color: var(--results-line) transparent;
+        scrollbar-width: thin;
+      }
+      .results-dot {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: var(--results-dot-hit);
+        height: var(--results-dot-hit);
+        cursor: pointer;
+      }
+      .results-dot::before {
+        content: "";
+        box-sizing: border-box;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        border: 1px solid color-mix(in srgb, var(--results-fg) 35%, transparent);
+      }
+      .results-dot-white::before {
+        background: var(--results-p1);
+      }
+      .results-dot-black::before {
+        background: var(--results-p2);
+      }
+      .results-dot-draw::before {
+        background: var(--results-draw);
+      }
+      .results-dot-live::before {
+        border: 1px dashed var(--results-fg);
+      }
+      .results-dot.is-viewing::before {
+        outline: 2px solid var(--results-accent);
+        outline-offset: 0.5px;
+      }
+      .results-label {
+        flex: none;
+        font-size: 11px;
+        line-height: var(--results-dot-hit);
+        opacity: 0.7;
+        white-space: nowrap;
+      }
+      .results-label:empty {
+        display: none;
+      }
+
+      .results-caret {
+        flex: none;
+        width: 20px;
+        height: 20px;
+        fill: currentColor;
+        opacity: 0.7;
+        transition: transform 0.25s ease;
+      }
+      #results.is-open .results-caret {
+        transform: rotate(180deg);
+      }
+
+      /* Height animation like Quasar's q-expansion-item */
+      .results-expand {
+        display: grid;
+        grid-template-rows: 0fr;
+        transition: grid-template-rows 0.25s ease;
+        border-top: 1px solid var(--results-line);
+      }
+      #results.is-open .results-expand {
+        grid-template-rows: 1fr;
+        /* Sets the open list apart from the graph below */
+        border-bottom: 1px solid var(--results-line);
+      }
+      .results-expand-inner {
+        min-height: 0;
+        overflow: hidden;
+      }
+      .results-games {
+        /*
+         * At most half the graph panel. On short panels, shrink further so
+         * the strip and list together leave the graph about 45% of the
+         * panel, but keep the header and about three rows.
+         */
+        max-height: clamp(
+          min(78px, 50cqh),
+          calc(55cqh - var(--results-strip-height, 0px)),
+          50cqh
+        );
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-color: var(--results-line) transparent;
+        scrollbar-width: thin;
+        font-size: 11px;
+      }
+      .results-games table {
+        width: 100%;
+        table-layout: fixed;
+        /* Collapsed borders keep table cells from drawing box shadows */
+        border-collapse: separate;
+        border-spacing: 0;
+      }
+      .results-games thead {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      /* Quasar's shadow-1 (variables.sass $shadow-1), as one even row */
+      .results-games thead tr {
+        box-shadow:
+          0 1px 3px rgba(0, 0, 0, 0.2),
+          0 1px 1px rgba(0, 0, 0, 0.14),
+          0 2px 1px -1px rgba(0, 0, 0, 0.12);
+      }
+      .results-games th,
+      .results-games td {
+        padding: 3px 4px;
+        overflow: hidden;
+        text-align: left;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .results-games th {
+        /* The panel colour can be translucent: lay it over the page background */
+        background:
+          linear-gradient(var(--results-panel), var(--results-panel)),
+          var(--results-bg);
+        color: color-mix(
+          in srgb,
+          var(--results-text) 85%,
+          var(--results-panel)
+        );
+        font-weight: 400;
+      }
+      .results-games th.results-num {
+        width: 3em;
+      }
+      .results-games th.results-result {
+        width: 5em;
+      }
+      .results-games th.results-moves {
+        width: 3.5em;
+      }
+      .results-games .results-num {
+        text-align: right;
+      }
+      /* Dim the text only, so a highlighted row's background stays solid */
+      .results-games td.results-num {
+        color: color-mix(in srgb, currentColor 70%, transparent);
+      }
+      .results-games .results-result {
+        text-align: center;
+      }
+      .results-games tbody tr {
+        cursor: pointer;
+      }
+      .results-games .results-winner {
+        font-weight: 700;
+      }
+      .results-games tr.results-live td {
+        font-style: italic;
+        opacity: 0.75;
+      }
+      #results .results-games tr.is-viewing td {
+        background: var(--results-accent);
+        color: var(--results-accent-text);
+      }
+      @media (hover: hover) {
+        .results-strip:hover {
+          background: var(--results-hover);
+        }
+        .results-dot:hover::before {
+          outline: 2px solid var(--results-accent);
+          outline-offset: 0.5px;
+        }
+        .results-games tbody tr:hover td {
+          background: var(--results-hover);
+        }
+      }
+
+      /* Narrow panels: drop Moves first; names then shrink with an ellipsis */
+      @container results (max-width: 300px) {
+        .results-moves {
+          display: none;
+        }
+      }
+
+      /*
+       * Wide panels: the results become their own column left of the graph.
+       * The list is always shown (the saved open state is kept for narrower
+       * panels) and fills the column below the strip.
+       */
+      @container chart (min-width: 800px) {
+        #results,
+        #results:not([hidden]) + #chart-area {
+          --results-column: clamp(320px, 28cqw, 380px);
+        }
+        #results {
+          --results-layout: column;
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          left: 0;
+          box-sizing: border-box;
+          width: var(--results-column);
+          display: flex;
+          flex-direction: column;
+          border-right: 1px solid var(--results-line);
+        }
+        #results:not([hidden]) + #chart-area {
+          margin-left: var(--results-column);
+        }
+        #results .results-strip,
+        #results .results-header {
+          cursor: default;
+        }
+        #results .results-strip:hover {
+          background: none;
+        }
+        #results .results-caret {
+          display: none;
+        }
+        /* Flex instead of the collapsing grid: no height animation here */
+        #results .results-expand {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        /* The column's own edge sets it apart from the graph */
+        #results.is-open .results-expand {
+          border-bottom: none;
+        }
+        #results .results-expand-inner {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        #results .results-games {
+          flex: 1;
+          min-height: 0;
+          max-height: none;
+        }
       }
 
       #ninja-wrapper {
@@ -75,7 +529,30 @@
         ></iframe>
       </div>
       <div id="chart-wrapper" class="wrapper">
-        <canvas id="chart" width></canvas>
+        <div id="results" hidden></div>
+        <div id="chart-area">
+          <canvas id="chart" width></canvas>
+          <div id="chart-controls">
+            <div
+              class="chart-toggle"
+              id="axis-range"
+              role="group"
+              aria-label="Vertical scale"
+            >
+              <button type="button" data-value="fit">Fit</button>
+              <button type="button" data-value="full">Full</button>
+            </div>
+            <div
+              class="chart-toggle"
+              id="eval-mode"
+              role="group"
+              aria-label="Evaluation"
+            >
+              <button type="button" data-value="winrate">Win %</button>
+              <button type="button" data-value="cp">cp</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
