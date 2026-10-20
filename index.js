@@ -11,17 +11,22 @@ import { createResultsPanel } from "./results-panel.js";
 
 const urlParams = new URLSearchParams(window.location.search);
 
-// const SERVER_URL = "http://192.168.1.2:23456";
-// `?server=<url>` overrides it, for local testing: only with `?debug` or on a
-// local page, so that a link to the public site can't show another server
-const isLocalPage = ["localhost", "127.0.0.1"].includes(
-  window.location.hostname,
-);
-const serverOverride =
-  urlParams.has("debug") || isLocalPage ? urlParams.get("server") : null;
-const SERVER_URL = (
-  serverOverride || "https://racetrack.mortenlohne.no"
-).replace(/\/+$/, "");
+// `?server=<url>` points the viewer at another Racetrack server
+function serverUrl() {
+  const fallback = "https://racetrack.mortenlohne.no";
+  const param = urlParams.get("server");
+  if (!param) {
+    return fallback;
+  }
+  try {
+    const url = new URL(param.trim());
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return param.trim().replace(/\/+$/, "");
+    }
+  } catch {}
+  return fallback;
+}
+const SERVER_URL = serverUrl();
 
 let gameState = null;
 let viewedGame = null; // The finished game shown in place of the live one
@@ -34,9 +39,6 @@ let roundNumber = 0;
 let moveCount = 0;
 let previousGame = null;
 let savedNotePlies = new Set(); // Track plies with final notes saved
-let livePv = { ply: null, pv: [] }; // Last complete PV seen for the ply being searched
-let finalPvs = new Map(); // Completed plies' final PVs, continued where truncated
-let livePvRound = null; // The live game livePv and finalPvs belong to
 
 let ninjaGameState = null;
 let theme = null;
@@ -355,11 +357,6 @@ const resultsPanel = createResultsPanel(document.getElementById("results"), {
     }
   },
 });
-if (urlParams.has("debug")) {
-  window.__resultsPanel = resultsPanel;
-  window.showFinishedGame = showFinishedGame;
-  window.showLiveGame = showLiveGame;
-}
 
 function updateResults() {
   if (!gameState) {
@@ -424,41 +421,6 @@ function formatName(name) {
     return "";
   }
   return name.trim();
-}
-
-// Syntaks reports aspiration-window fail-high/low results with a truncated PV
-// (often just the root move), and Racetrack doesn't forward the bound flag.
-// While the reported PV is a prefix of the last complete one, keep the latter.
-function pvWithContinuation(pv, ply) {
-  pv = toPvArray(pv);
-  if (
-    livePv.ply === ply &&
-    pv.length < livePv.pv.length &&
-    pv.every((move, i) => move === livePv.pv[i])
-  ) {
-    return livePv.pv;
-  }
-  return pv;
-}
-
-function trackLivePv() {
-  const uciInfo = gameState.currentMoveUciInfo;
-  if (!uciInfo) {
-    return;
-  }
-  const ply = gameState.openingMoves.length + gameState.moves.length;
-  livePv = { ply, pv: pvWithContinuation(uciInfo.pv, ply) };
-}
-
-// Keeps each newly completed ply's final PV, before livePv moves on
-function trackFinalPvs() {
-  const openingMoveCount = gameState.openingMoves.length;
-  gameState.moves.forEach((move, i) => {
-    const ply = i + openingMoveCount;
-    if (move.uciInfo && !finalPvs.has(ply)) {
-      finalPvs.set(ply, pvWithContinuation(move.uciInfo.pv, ply));
-    }
-  });
 }
 
 function toPvArray(pv) {
@@ -831,21 +793,8 @@ function loadGameIntoNinja(game, { live, result = null }) {
 }
 
 function updateGameState() {
-  // PV tracking follows the live game even while a finished one is shown,
-  // and survives reloading the same game when returning to it
-  if (
-    livePvRound !== gameState.roundNumber ||
-    finalPvs.size > gameState.moves.length
-  ) {
-    livePvRound = gameState.roundNumber;
-    livePv = { ply: null, pv: [] };
-    finalPvs = new Map();
-  }
-  trackFinalPvs();
-
   if (viewedGame) {
-    // Viewing a finished game: keep the live game's progress for later
-    trackLivePv();
+    // Viewing a finished game: the live game keeps updating in the background
     updateResults();
     return;
   }
@@ -858,7 +807,6 @@ function updateGameState() {
     roundNumber = gameState.roundNumber;
     moveCount = 0;
     loadGameIntoNinja(gameState, { live: true });
-    trackLivePv();
     moveCount = gameState.moves.length;
   } else if (moveCount < gameState.moves.length) {
     // New move(s)
@@ -866,12 +814,10 @@ function updateGameState() {
       sendToNinja("APPEND_PLY", move.move);
     });
     saveAnalysisToNotes();
-    trackLivePv();
     sendClocks(true);
     moveCount = gameState.moves.length;
   } else {
     // New analysis
-    trackLivePv();
     setCurrentAnalysis();
   }
 
@@ -965,7 +911,7 @@ function setCurrentAnalysis() {
     const turn = ninjaGameState.turn;
     const botName =
       turn === 1 ? formatName(game.whitePlayer) : formatName(game.blackPlayer);
-    const uciInfo = { ...game.currentMoveUciInfo, pv: livePv.pv };
+    const uciInfo = game.currentMoveUciInfo;
     sendToNinja("SET_ANALYSIS", formatAnalysis(uciInfo, turn, null, botName));
     sendToNinja("SET_EVAL", formatEval(uciInfo, turn));
   } else {
@@ -1001,7 +947,6 @@ function setCurrentAnalysis() {
 
 function saveAnalysisToNotes() {
   const game = shownGame();
-  const isLive = viewedGame === null;
   const notes = {};
   const openingMoveCount = game.openingMoves.length;
 
@@ -1020,15 +965,7 @@ function saveAnalysisToNotes() {
     const name =
       turn === 1 ? formatName(game.whitePlayer) : formatName(game.blackPlayer);
 
-    // The final info line may itself be a truncated bound result
-    // (only the live game's search was tracked)
-    const uciInfo =
-      move.uciInfo && isLive
-        ? {
-            ...move.uciInfo,
-            pv: finalPvs.get(ply) ?? pvWithContinuation(move.uciInfo.pv, ply),
-          }
-        : move.uciInfo;
+    const uciInfo = move.uciInfo;
     notes[plyID] = formatEngineNotes(uciInfo, turn, name);
     savedNotePlies.add(plyID);
   });

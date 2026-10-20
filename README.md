@@ -6,6 +6,7 @@ A web-based visualization tool for watching live Tak engine matches. This applic
 
 - **Live Game Display**: Watch Tak engine matches in real-time via an embedded PTN Ninja viewer
 - **Evaluation Chart**: Interactive chart showing engine evaluations throughout the game
+- **Results Strip and Game List**: Per-game results for the current match, with finished games viewable in place (requires a Racetrack build that sends results; older servers simply hide it)
 - **Theme Sync**: Chart colors automatically match the PTN Ninja theme
 - **Game History**: Notifications when games end with links to view completed games
 - **Persistent Settings**: Board and chart preferences are saved locally
@@ -50,13 +51,15 @@ python -m http.server 8080
 
 Then open `http://localhost:8080` in your browser.
 
-### 4. Configure Server URL (if needed)
+### 4. Choose a server (optional)
 
-By default, the application connects to `https://racetrack.mortenlohne.no`. If Racetrack is running on a different URL, edit the `SERVER_URL` constant in `index.js`:
+By default, the application connects to `https://racetrack.mortenlohne.no`. To use a different Racetrack server, pass its URL in the `server` URL parameter:
 
-```javascript
-const SERVER_URL = "http://localhost:23456";
 ```
+http://localhost:8080/?server=http://localhost:23456
+```
+
+Only `http` and `https` URLs are accepted; anything else falls back to the default.
 
 ## Usage
 
