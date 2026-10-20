@@ -59,7 +59,7 @@
 
       #chart-wrapper {
         box-shadow: 0 7px 9px -7px rgba(0, 0, 0, 0.7) inset;
-        container-type: size;
+        container: chart / size;
         display: flex;
         flex-direction: column;
       }
@@ -371,6 +371,60 @@
       @container results (max-width: 300px) {
         .results-moves {
           display: none;
+        }
+      }
+
+      /*
+       * Wide panels: the results become their own column left of the graph.
+       * The list is always shown (the saved open state is kept for narrower
+       * panels) and fills the column below the strip.
+       */
+      @container chart (min-width: 800px) {
+        #results,
+        #results:not([hidden]) + #chart-area {
+          --results-column: clamp(320px, 28cqw, 380px);
+        }
+        #results {
+          --results-layout: column;
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          left: 0;
+          box-sizing: border-box;
+          width: var(--results-column);
+          display: flex;
+          flex-direction: column;
+          border-right: 1px solid var(--results-line);
+        }
+        #results:not([hidden]) + #chart-area {
+          margin-left: var(--results-column);
+        }
+        #results .results-strip {
+          cursor: default;
+        }
+        #results .results-strip:hover {
+          background: none;
+        }
+        #results .results-caret {
+          display: none;
+        }
+        /* Flex instead of the collapsing grid: no height animation here */
+        #results .results-expand {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        #results .results-expand-inner {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+        #results .results-games {
+          flex: 1;
+          min-height: 0;
+          max-height: none;
         }
       }
 

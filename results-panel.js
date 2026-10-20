@@ -119,6 +119,8 @@ export function createResultsPanel(root, { onSelect }) {
   let viewing = null;
   let liveRow = null;
   let open = readOpen();
+  // Wide panels show the list as a column regardless of `open`
+  let wide = false;
   let hasRendered = false;
   // Follow the newest dot / row unless the viewer has scrolled up
   let dotsPinned = true;
@@ -144,12 +146,27 @@ export function createResultsPanel(root, { onSelect }) {
     }
   }
 
+  function isWide() {
+    return (
+      getComputedStyle(root).getPropertyValue("--results-layout").trim() ===
+      "column"
+    );
+  }
+
+  function listShown() {
+    return open || wide;
+  }
+
   function applyOpen() {
     root.classList.toggle("is-open", open);
-    strip.setAttribute("aria-expanded", String(open));
+    strip.setAttribute("aria-expanded", String(listShown()));
   }
 
   function toggle() {
+    if (wide) {
+      // The list is always shown here: keep the saved preference as it is
+      return;
+    }
     open = !open;
     applyOpen();
     writeOpen(open);
@@ -211,8 +228,21 @@ export function createResultsPanel(root, { onSelect }) {
     }
   }
   new ResizeObserver(measureStrip).observe(strip);
+  // The panel's width changes whenever the layout switches
   new ResizeObserver(() => {
-    if (open && listPinned) {
+    const nowWide = isWide();
+    if (nowWide === wide) {
+      return;
+    }
+    const wasShown = listShown();
+    wide = nowWide;
+    applyOpen();
+    if (hasRendered && !wasShown) {
+      scrollToLiveRow();
+    }
+  }).observe(root);
+  new ResizeObserver(() => {
+    if (listShown() && listPinned) {
       list.scrollTop = list.scrollHeight;
     }
   }).observe(list);
@@ -347,7 +377,8 @@ export function createResultsPanel(root, { onSelect }) {
 
       const listWasPinned = listPinned;
       if (!hasRendered) {
-        // Before anything reads layout, so a saved open state doesn't animate
+        // While still hidden, so a saved open state doesn't animate
+        wide = isWide();
         applyOpen();
       }
       root.hidden = false;
@@ -360,10 +391,10 @@ export function createResultsPanel(root, { onSelect }) {
 
       if (!hasRendered) {
         hasRendered = true;
-        if (open) {
+        if (listShown()) {
           scrollToLiveRow();
         }
-      } else if (open && listWasPinned) {
+      } else if (listShown() && listWasPinned) {
         list.scrollTop = list.scrollHeight;
       }
     },
