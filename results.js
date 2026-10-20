@@ -163,6 +163,35 @@ export function durationMs(duration) {
   return secs * 1000 + Math.round(nanos / 1e6);
 }
 
+// Remaining time as PTN Ninja writes it in clock notes ("M:SS" or "H:MM:SS"):
+// zero-padded minutes and seconds, with trimmed decimal seconds only under a
+// minute. A port of formatClockNoteValue in PTN Ninja's game actions.
+function formatClockNoteValue(ms) {
+  const totalMs = Math.max(0, Math.round(ms));
+  const totalSeconds = Math.floor(totalMs / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = (n) => (n < 10 ? "0" + n : "" + n);
+  let secStr = pad(s);
+  if (totalMs < 60000) {
+    const frac = totalMs % 1000;
+    if (frac) {
+      secStr += "." + String(frac).padStart(3, "0").replace(/0+$/, "");
+    }
+  }
+  return h > 0 ? `${h}:${pad(m)}:${secStr}` : `${m}:${secStr}`;
+}
+
+// PTN Ninja clock note ("clock1:4:32") for a player's remaining time, a
+// serde Duration. player is 1 or 2. Null if the duration is missing or invalid.
+export function clockNote(player, duration) {
+  if (player !== 1 && player !== 2) return null;
+  const ms = durationMs(duration);
+  if (ms === null) return null;
+  return `clock${player}:${formatClockNoteValue(ms)}`;
+}
+
 // Seconds with up to millisecond precision and no trailing zeros
 function formatSeconds(ms) {
   return String(Number((ms / 1000).toFixed(3)));

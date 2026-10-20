@@ -4,6 +4,7 @@ import {
   MATE_CP,
   buildResultsModel,
   centipawns,
+  clockNote,
   symlog,
   symlogInverse,
   isMatchOver,
@@ -318,4 +319,17 @@ test("symlog is odd, monotonic, and inverted by symlogInverse", () => {
   for (const cp of [-20000, -350, -1, 0, 1, 99, 1000]) {
     assert.ok(Math.abs(symlogInverse(symlog(cp)) - cp) < 1e-6, String(cp));
   }
+});
+
+test("clockNote", () => {
+  assert.equal(clockNote(1, { secs: 272 }), "clock1:4:32");
+  assert.equal(clockNote(2, { secs: 8, nanos: 340000000 }), "clock2:0:08.34");
+  assert.equal(clockNote(1, { secs: 3930 }), "clock1:1:05:30");
+  assert.equal(clockNote(2, { secs: 59, nanos: 999000000 }), "clock2:0:59.999");
+  assert.equal(clockNote(1, { secs: 60, nanos: 400000000 }), "clock1:1:00");
+  assert.equal(clockNote(1, { secs: 0 }), "clock1:0:00");
+  assert.equal(clockNote(1, undefined), null);
+  assert.equal(clockNote(2, null), null);
+  assert.equal(clockNote(2, {}), null);
+  assert.equal(clockNote(3, { secs: 5 }), null);
 });

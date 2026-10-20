@@ -8,6 +8,7 @@ import {
   isMatchOver,
   isNewMatch,
   matchInfo,
+  clockNote,
   MATE_CP,
   ptnClock,
   ptnResult,
@@ -1306,6 +1307,16 @@ function saveAnalysisToNotes() {
 
     const uciInfo = move.uciInfo;
     notes[plyID] = formatEngineNotes(uciInfo, turn, name);
+
+    // The mover's remaining time after this move (player 1 makes the even
+    // plies), when the server sends clocks
+    const clock = clockNote(
+      turn,
+      turn === 1 ? move.whiteTimeLeft : move.blackTimeLeft,
+    );
+    if (clock) {
+      notes[plyID].push(clock);
+    }
     savedNotePlies.add(plyID);
   });
 
