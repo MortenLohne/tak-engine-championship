@@ -43,6 +43,10 @@ A strip at the top of the graph panel, above the chart, in every orientation. Th
 - Clicking a dot opens that game in the viewer. Clicking the live game's dot returns to the live game.
 - Optional "Game 6 of 20" text when the total number of rounds is known. Show it where it fits.
 
+### Wide panels (added after approval)
+
+When the graph panel is wide enough, a stacked table looks awkward stretched across it. Past a width threshold, the strip and the game list become their own column to the left of the chart, with the chart beside them. In this layout the list fills the column below the strip, scrolls vertically, and stays open, so the caret is hidden. Narrower panels keep the stacked layout. The switch is based on the graph panel's own width (a container query), not the window's, so it behaves the same in landscape and portrait.
+
 ### Game list (expands from the strip)
 
 - It opens and closes with a height animation of about 250 ms, like `q-expansion-item`.
@@ -56,7 +60,7 @@ A strip at the top of the graph panel, above the chart, in every orientation. Th
 ### Viewing a past game
 
 - Opening a past game loads it into the embedded PTN Ninja (board and PTN), the eval graph and the engine notes, exactly as the live game is shown today.
-- While a past game is shown, a PTN Ninja notification (via the embed API's `NOTIFY`) says "Viewing game N" and has a **Back to live** action. It stays up until the viewer returns to live, and it is dismissed whichever way they return: through its action, the live dot or the live row. Opening a different past game replaces it rather than stacking a second one.
+- While a past game is shown, a PTN Ninja notification (via the embed API's `NOTIFY`) says "Viewing game N" and has a **Back to live** action in the primary colour, like the game-over notification's "View" button. It stays up until the viewer returns to live, and it is dismissed whichever way they return: through its action, the live dot or the live row. Opening a different past game replaces it rather than stacking a second one. It appears in the top-right corner with the other notifications (`position: "top-right"`), because the default bottom position covers PTN Ninja's navigation toolbar (the user's call).
 - While a past game is shown, live updates keep arriving and the strip and list keep updating, but nothing from the live game reaches the viewer or the graph.
 - If the live game ends or a new game starts while a past game is shown, stay on the past game. The new result simply appears in the strip and list.
 - **Back to live**, or the live dot or row, restores the live game in full: board at the latest position, graph, notes, clocks and live analysis.
@@ -122,7 +126,7 @@ Until PTN Ninja ships this, the "Viewing game N" notification can linger after t
 
 - "Engine A" (left) is the first engine in Racetrack's engine list. Points and dot colours count from A's side, regardless of who played White in each game.
 - With more than two engines, hide the score row and the bar, and keep the dots (coloured by White win, draw or Black win) and the game list.
-- The "Viewing game N" notification uses PTN Ninja's default position and keeps its usual close button. If the viewer closes it, they can still return through the live dot or row.
+- The "Viewing game N" notification keeps its usual close button. If the viewer closes it, they can still return through the live dot or row.
 - Past games open from the dots and rows in this page rather than in a new tab. The existing game-over notification's "View" button (new tab) stays as it is.
 - Use `GET /games/{round}` (tournament-wide round number) rather than a per-game-id path, since results are tournament-wide.
 - `engines` and per-result engine indices were added to the payload (the reviewer's question). The frontend can't otherwise know which engine is A, and names can collide.

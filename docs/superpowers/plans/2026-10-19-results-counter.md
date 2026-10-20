@@ -339,6 +339,35 @@ git add index.html index.js results-panel.js
 git commit -m "Show the match results strip and game list beside the graph"
 ```
 
+### Task C2b: Side-by-side layout on wide panels (added after approval)
+
+**Files:**
+- Modify: `index.html` (CSS)
+- Modify: `results-panel.js` (only if needed, e.g. for open-state handling in wide mode)
+
+**Interfaces:**
+- Consumes: C2's panel and layout (`#chart-wrapper` as a size container holding `#results` and `#chart-area`), and C3's `viewingRound` wiring. Neither interface changes.
+
+Behaviour to implement:
+- Add a container query on `#chart-wrapper`'s width. At or above a threshold of about 900 px (tune it so the table's columns, Moves included, sit comfortably), lay out `#results` as a left column of fixed or clamped width (about 320–380 px), with `#chart-area` filling the rest.
+- In that layout:
+  - the strip sits at the top of the column;
+  - the game list fills the remaining column height, scrolling vertically only;
+  - the list is always shown and the caret is hidden;
+  - the `"resultsOpen"` preference is ignored, but not overwritten;
+  - the half-height cap doesn't apply.
+- Below the threshold, the approved stacked layout is unchanged.
+- The canvas must resize correctly when the layout switches (the existing ResizeObserver on `#chart-area` should cover this; verify it).
+
+- [ ] **Step 1: Implement** the CSS and any panel tweaks.
+- [ ] **Step 2: Verify.** In the preview browser with synthetic data (`?debug`), check a wide desktop size (e.g. 2560×1080 and 1920×1080), the default pane size, mobile 375×812 and landscape 812×375. For each, record which layout is active, that the chart is visible and correctly sized, and the horizontal-overflow count (`0` expected) with 300 games.
+- [ ] **Step 3: Commit**
+
+```bash
+git add index.html results-panel.js
+git commit -m "Put the results in their own column on wide panels"
+```
+
 ### Task C3: Viewing finished games
 
 **Files:**
@@ -360,7 +389,7 @@ Behaviour to implement:
   - sets `viewedGame`;
   - calls `loadGameIntoNinja(game, { live: false })`;
   - redraws the chart;
-  - sends `NOTIFY` with `{ id: "viewing-finished-game", message: "Viewing game N", timeout: 0, actions: [{ label: "Back to live", action: "BACK_TO_LIVE" }, { icon: "close" }] }`.
+  - sends `NOTIFY` with `{ id: "viewing-finished-game", message: "Viewing game N", position: "top-right", timeout: 0, actions: [{ color: "primary", label: "Back to live", action: "BACK_TO_LIVE" }, { icon: "close" }] }`.
 - `showLiveGame` does the following:
   - clears `viewedGame`;
   - sends `DISMISS_NOTIFY` `{ id: "viewing-finished-game" }`;
