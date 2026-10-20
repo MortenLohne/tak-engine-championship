@@ -190,6 +190,7 @@ export function createResultsPanel(root, { onSelect }) {
       toggle();
     }
   });
+  header.addEventListener("click", toggle);
   strip.addEventListener("keydown", (event) => {
     if (
       event.target === strip &&

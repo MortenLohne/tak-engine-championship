@@ -135,6 +135,7 @@
        * below it
        */
       .results-header {
+        cursor: pointer;
         --results-fg: var(--results-header-text);
         --results-surface: var(--results-header-bg);
         position: relative;
@@ -426,7 +427,8 @@
         #results:not([hidden]) + #chart-area {
           margin-left: var(--results-column);
         }
-        #results .results-strip {
+        #results .results-strip,
+        #results .results-header {
           cursor: default;
         }
         #results .results-strip:hover {
