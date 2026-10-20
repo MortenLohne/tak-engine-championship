@@ -72,11 +72,15 @@
         min-height: 0;
       }
 
-      /* Win % / centipieces toggle, in the chart's top-right corner */
-      #eval-mode {
+      /* Chart toggles (scale fit, Win % / centipieces), top-right corner */
+      #chart-controls {
         position: absolute;
         top: 6px;
         right: 8px;
+        display: flex;
+        gap: 6px;
+      }
+      .chart-toggle {
         display: flex;
         border: 1px solid var(--results-accent);
         border-radius: 4px;
@@ -89,7 +93,7 @@
           Arial,
           sans-serif;
       }
-      #eval-mode button {
+      .chart-toggle button {
         padding: 3px 7px;
         border: 0;
         background: transparent;
@@ -97,7 +101,7 @@
         font: inherit;
         cursor: pointer;
       }
-      #eval-mode button[aria-pressed="true"] {
+      .chart-toggle button[aria-pressed="true"] {
         background: var(--results-accent);
         color: var(--results-accent-text);
         cursor: default;
@@ -528,9 +532,25 @@
         <div id="results" hidden></div>
         <div id="chart-area">
           <canvas id="chart" width></canvas>
-          <div id="eval-mode" role="group" aria-label="Evaluation scale">
-            <button type="button" data-mode="winrate">Win %</button>
-            <button type="button" data-mode="cp">cp</button>
+          <div id="chart-controls">
+            <div
+              class="chart-toggle"
+              id="axis-range"
+              role="group"
+              aria-label="Vertical scale"
+            >
+              <button type="button" data-value="fit">Fit</button>
+              <button type="button" data-value="full">Full</button>
+            </div>
+            <div
+              class="chart-toggle"
+              id="eval-mode"
+              role="group"
+              aria-label="Evaluation"
+            >
+              <button type="button" data-value="winrate">Win %</button>
+              <button type="button" data-value="cp">cp</button>
+            </div>
           </div>
         </div>
       </div>

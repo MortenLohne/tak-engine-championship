@@ -143,7 +143,7 @@ function setChartSettings(key, value) {
   localStorage.setItem(chartSettingsStorageKey, JSON.stringify(chartSettings));
   applyYAxis();
   updateChart();
-  updateEvalModeToggle();
+  updateChartToggles();
 }
 
 // Centipiece axis ticks at round values, placed on the symlog scale
@@ -238,7 +238,7 @@ const verticalLinePlugin = {
 const evalModeLayoutPlugin = {
   id: "evalModeLayout",
   afterLayout(chart) {
-    const toggle = document.getElementById("eval-mode");
+    const toggle = document.getElementById("chart-controls");
     // Item positions aren't set until the legend draws; row widths are
     const rows = chart.legend?.lineWidths ?? [];
     let changed = false;
@@ -289,11 +289,10 @@ const chart = new Chart(document.getElementById("chart"), {
     },
     plugins: {
       legend: {
-        // Leaves the top-right corner for the Win % / cp toggle
+        // Leaves the top-right corner for the chart toggles
         align: "start",
-        onClick: () => {
-          setChartSettings("fixYAxis", !chartSettings.fixYAxis);
-        },
+        // The scale toggles are buttons now; don't hide a player's line
+        onClick: () => {},
       },
       tooltip: { callbacks: {} },
     },
@@ -399,23 +398,41 @@ function updateChart() {
   chart.update();
 }
 
-// Win % / cp toggle
-const evalModeToggle = document.getElementById("eval-mode");
+// Chart toggles: each button group shows and sets one chart setting
+const chartToggles = [
+  {
+    element: document.getElementById("axis-range"),
+    current: () => (chartSettings.fixYAxis ? "full" : "fit"),
+    set: (value) => setChartSettings("fixYAxis", value === "full"),
+  },
+  {
+    element: document.getElementById("eval-mode"),
+    current: () => (isCentipieceMode() ? "cp" : "winrate"),
+    set: (value) => setChartSettings("evalMode", value),
+  },
+];
 
-function updateEvalModeToggle() {
-  const mode = isCentipieceMode() ? "cp" : "winrate";
-  evalModeToggle.querySelectorAll("button").forEach((button) => {
-    button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+function updateChartToggles() {
+  chartToggles.forEach(({ element, current }) => {
+    const value = current();
+    element.querySelectorAll("button").forEach((button) => {
+      button.setAttribute(
+        "aria-pressed",
+        String(button.dataset.value === value),
+      );
+    });
   });
 }
 
-evalModeToggle.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-mode]");
-  if (button && button.dataset.mode !== (chartSettings.evalMode ?? "winrate")) {
-    setChartSettings("evalMode", button.dataset.mode);
-  }
+chartToggles.forEach((toggle) => {
+  toggle.element.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-value]");
+    if (button && button.dataset.value !== toggle.current()) {
+      toggle.set(button.dataset.value);
+    }
+  });
 });
-updateEvalModeToggle();
+updateChartToggles();
 applyYAxis();
 
 function resizeChart() {
