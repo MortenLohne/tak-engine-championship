@@ -20,6 +20,8 @@ let moveCount = 0;
 let previousGame = null;
 let savedNotePlies = new Set(); // Track plies with final notes saved
 let livePv = { ply: null, pv: [] }; // Last complete PV seen for the ply being searched
+let finalPvs = new Map(); // Completed plies' final PVs, continued where truncated
+let livePvRound = null; // The live game livePv and finalPvs belong to
 
 let ninjaGameState = null;
 let theme = null;
@@ -433,6 +435,17 @@ function trackLivePv() {
   livePv = { ply, pv: pvWithContinuation(uciInfo.pv, ply) };
 }
 
+// Keeps each newly completed ply's final PV, before livePv moves on
+function trackFinalPvs() {
+  const openingMoveCount = gameState.openingMoves.length;
+  gameState.moves.forEach((move, i) => {
+    const ply = i + openingMoveCount;
+    if (move.uciInfo && !finalPvs.has(ply)) {
+      finalPvs.set(ply, pvWithContinuation(move.uciInfo.pv, ply));
+    }
+  });
+}
+
 function toPvArray(pv) {
   if (typeof pv === "string") {
     return pv.trim() ? pv.trim().split(/\s+/) : [];
@@ -773,8 +786,21 @@ function loadGameIntoNinja(game, { live }) {
 }
 
 function updateGameState() {
+  // PV tracking follows the live game even while a finished one is shown,
+  // and survives reloading the same game when returning to it
+  if (
+    livePvRound !== gameState.roundNumber ||
+    finalPvs.size > gameState.moves.length
+  ) {
+    livePvRound = gameState.roundNumber;
+    livePv = { ply: null, pv: [] };
+    finalPvs = new Map();
+  }
+  trackFinalPvs();
+
   if (viewedGame) {
     // Viewing a finished game: keep the live game's progress for later
+    trackLivePv();
     updateResults();
     return;
   }
@@ -786,7 +812,6 @@ function updateGameState() {
     // New game
     roundNumber = gameState.roundNumber;
     moveCount = 0;
-    livePv = { ply: null, pv: [] };
     loadGameIntoNinja(gameState, { live: true });
     trackLivePv();
     moveCount = gameState.moves.length;
@@ -940,7 +965,10 @@ function saveAnalysisToNotes() {
     // (only the live game's search was tracked)
     const uciInfo =
       move.uciInfo && isLive
-        ? { ...move.uciInfo, pv: pvWithContinuation(move.uciInfo.pv, ply) }
+        ? {
+            ...move.uciInfo,
+            pv: finalPvs.get(ply) ?? pvWithContinuation(move.uciInfo.pv, ply),
+          }
         : move.uciInfo;
     notes[plyID] = formatEngineNotes(uciInfo, turn, name);
     savedNotePlies.add(plyID);
