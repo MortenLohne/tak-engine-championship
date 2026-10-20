@@ -85,8 +85,8 @@ export function createResultsPanel(root, { onSelect }) {
             <thead>
               <tr>
                 <th class="results-num">#</th>
-                <th>White</th>
-                <th>Black</th>
+                <th>Player 1</th>
+                <th>Player 2</th>
                 <th class="results-result">Result</th>
                 <th class="results-num results-moves">Moves</th>
               </tr>

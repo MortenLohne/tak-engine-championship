@@ -326,7 +326,21 @@
       .results-games table {
         width: 100%;
         table-layout: fixed;
-        border-collapse: collapse;
+        /* Collapsed borders keep table cells from drawing box shadows */
+        border-collapse: separate;
+        border-spacing: 0;
+      }
+      .results-games thead {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      /* Quasar's shadow-1 (variables.sass $shadow-1), as one even row */
+      .results-games thead tr {
+        box-shadow:
+          0 1px 3px rgba(0, 0, 0, 0.2),
+          0 1px 1px rgba(0, 0, 0, 0.14),
+          0 2px 1px -1px rgba(0, 0, 0, 0.12);
       }
       .results-games th,
       .results-games td {
@@ -337,9 +351,6 @@
         white-space: nowrap;
       }
       .results-games th {
-        position: sticky;
-        top: 0;
-        z-index: 1;
         /* The panel colour can be translucent: lay it over the page background */
         background:
           linear-gradient(var(--results-panel), var(--results-panel)),
@@ -350,15 +361,6 @@
           var(--results-panel)
         );
         font-weight: 400;
-        /*
-         * Quasar's shadow-1 (variables.sass $shadow-1), only below: clipping
-         * each cell's sides keeps it one even shadow along the row
-         */
-        box-shadow:
-          0 1px 3px rgba(0, 0, 0, 0.2),
-          0 1px 1px rgba(0, 0, 0, 0.14),
-          0 2px 1px -1px rgba(0, 0, 0, 0.12);
-        clip-path: inset(0 0 -6px 0);
       }
       .results-games th.results-num {
         width: 3em;
