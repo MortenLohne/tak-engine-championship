@@ -350,6 +350,13 @@ function updateTheme(newTheme) {
       : themeColors.textDark
     : "";
 
+  // Text on the primary colour, as PTN Ninja picks it
+  const accentTextColor = theme
+    ? theme.primaryDark
+      ? themeColors.textLight
+      : themeColors.textDark
+    : "";
+
   document.body.style.background = themeColors.bg || "";
   document.getElementById("chart-wrapper").style.background =
     themeColors.panel || "";
@@ -362,6 +369,7 @@ function updateTheme(newTheme) {
     "--results-p1": themeColors.player1,
     "--results-p2": themeColors.player2,
     "--results-accent": themeColors.primary,
+    "--results-accent-text": accentTextColor,
   };
   Object.entries(resultsColors).forEach(([name, value]) => {
     if (value) {
