@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -31,7 +31,12 @@
         justify-content: center;
         align-items: center;
         background-color: rgba(0, 0, 0, 0.7);
-        font-family: Roboto, -apple-system, Helvetica Neue, Helvetica, Arial,
+        font-family:
+          Roboto,
+          -apple-system,
+          Helvetica Neue,
+          Helvetica,
+          Arial,
           sans-serif;
         color: white;
       }
@@ -54,6 +59,319 @@
 
       #chart-wrapper {
         box-shadow: 0 7px 9px -7px rgba(0, 0, 0, 0.7) inset;
+        container-type: size;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #chart-area {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+      }
+
+      /* Match results strip and game list */
+
+      :root {
+        --results-bg: #fff;
+        --results-panel: #fff;
+        --results-text: #666;
+        --results-p1: #f2f2f2;
+        --results-p2: #222;
+        --results-accent: #4a90d9;
+        --results-dot-hit: 14px;
+      }
+      @media (pointer: coarse) {
+        :root {
+          --results-dot-hit: 24px;
+        }
+      }
+
+      #results {
+        --results-draw: color-mix(
+          in srgb,
+          var(--results-text) 50%,
+          var(--results-panel)
+        );
+        --results-line: color-mix(
+          in srgb,
+          var(--results-text) 18%,
+          transparent
+        );
+        --results-hover: color-mix(
+          in srgb,
+          var(--results-text) 7%,
+          transparent
+        );
+        flex: none;
+        container: results / inline-size;
+        color: var(--results-text);
+        font-family:
+          Roboto,
+          -apple-system,
+          Helvetica Neue,
+          Helvetica,
+          Arial,
+          sans-serif;
+        font-size: 12px;
+        line-height: 1.3;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #results[hidden] {
+        display: none;
+      }
+
+      .results-strip {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 4px 6px 8px;
+        cursor: pointer;
+      }
+      .results-strip:focus-visible {
+        outline: 2px solid var(--results-accent);
+        outline-offset: -2px;
+      }
+      .results-body {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .results-score {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 6px;
+        white-space: nowrap;
+      }
+      .results-side {
+        display: flex;
+        align-items: baseline;
+        gap: 4px;
+        min-width: 0;
+      }
+      .results-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .results-wins {
+        flex: none;
+        font-size: 15px;
+      }
+      .results-draws {
+        flex: none;
+        opacity: 0.75;
+      }
+
+      .results-bar {
+        display: flex;
+        height: 4px;
+        margin: 4px 0;
+        border-radius: 2px;
+        overflow: hidden;
+        background: var(--results-line);
+      }
+      .results-bar-a {
+        background: var(--results-p1);
+      }
+      .results-bar-draw {
+        background: var(--results-draw);
+      }
+      .results-bar-b {
+        background: var(--results-p2);
+      }
+      #results.results-multi .results-score,
+      #results.results-multi .results-bar {
+        display: none;
+      }
+
+      .results-row {
+        display: flex;
+        align-items: flex-end;
+        gap: 6px;
+      }
+      .results-dots {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-wrap: wrap;
+        max-height: calc(3 * var(--results-dot-hit));
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-color: var(--results-line) transparent;
+        scrollbar-width: thin;
+      }
+      .results-dot {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: var(--results-dot-hit);
+        height: var(--results-dot-hit);
+        cursor: pointer;
+      }
+      .results-dot::before {
+        content: "";
+        box-sizing: border-box;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        border: 1px solid
+          color-mix(in srgb, var(--results-text) 35%, transparent);
+      }
+      .results-dot-a::before,
+      .results-dot-white::before {
+        background: var(--results-p1);
+      }
+      .results-dot-b::before,
+      .results-dot-black::before {
+        background: var(--results-p2);
+      }
+      .results-dot-draw::before {
+        background: var(--results-draw);
+      }
+      .results-dot-live::before {
+        border: 1px dashed var(--results-text);
+      }
+      .results-dot.is-viewing::before {
+        outline: 2px solid var(--results-accent);
+        outline-offset: 0.5px;
+      }
+      .results-label {
+        flex: none;
+        font-size: 11px;
+        line-height: var(--results-dot-hit);
+        opacity: 0.7;
+        white-space: nowrap;
+      }
+      .results-label:empty {
+        display: none;
+      }
+
+      .results-caret {
+        flex: none;
+        width: 20px;
+        height: 20px;
+        fill: currentColor;
+        opacity: 0.7;
+        transition: transform 0.25s ease;
+      }
+      #results.is-open .results-caret {
+        transform: rotate(180deg);
+      }
+
+      /* Height animation like Quasar's q-expansion-item */
+      .results-expand {
+        display: grid;
+        grid-template-rows: 0fr;
+        transition: grid-template-rows 0.25s ease;
+        border-top: 1px solid var(--results-line);
+      }
+      #results.is-open .results-expand {
+        grid-template-rows: 1fr;
+      }
+      .results-expand-inner {
+        min-height: 0;
+        overflow: hidden;
+      }
+      .results-games {
+        /*
+         * At most half the graph panel. On short panels, shrink further so
+         * the strip and list together leave the graph about 45% of the
+         * panel, but keep the header and about three rows.
+         */
+        max-height: clamp(
+          min(78px, 50cqh),
+          calc(55cqh - var(--results-strip-height, 0px)),
+          50cqh
+        );
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-color: var(--results-line) transparent;
+        scrollbar-width: thin;
+        font-size: 11px;
+      }
+      .results-games table {
+        width: 100%;
+        table-layout: fixed;
+        border-collapse: collapse;
+      }
+      .results-games th,
+      .results-games td {
+        padding: 3px 4px;
+        overflow: hidden;
+        text-align: left;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .results-games th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        /* The panel colour can be translucent: lay it over the page background */
+        background:
+          linear-gradient(var(--results-panel), var(--results-panel)),
+          var(--results-bg);
+        color: color-mix(
+          in srgb,
+          var(--results-text) 85%,
+          var(--results-panel)
+        );
+        font-weight: 400;
+      }
+      .results-games th.results-num {
+        width: 3em;
+      }
+      .results-games th.results-result {
+        width: 5em;
+      }
+      .results-games th.results-moves {
+        width: 3.5em;
+      }
+      .results-games .results-num {
+        text-align: right;
+      }
+      .results-games td.results-num {
+        opacity: 0.7;
+      }
+      .results-games .results-result {
+        text-align: center;
+      }
+      .results-games tbody tr {
+        cursor: pointer;
+      }
+      .results-games .results-winner {
+        font-weight: 700;
+      }
+      .results-games tr.results-live td {
+        font-style: italic;
+        opacity: 0.75;
+      }
+      #results .results-games tr.is-viewing td {
+        background: color-mix(in srgb, var(--results-accent) 25%, transparent);
+      }
+      @media (hover: hover) {
+        .results-strip:hover {
+          background: var(--results-hover);
+        }
+        .results-dot:hover::before {
+          outline: 2px solid var(--results-accent);
+          outline-offset: 0.5px;
+        }
+        .results-games tbody tr:hover td {
+          background: var(--results-hover);
+        }
+      }
+
+      /* Narrow panels: drop Moves first; names then shrink with an ellipsis */
+      @container results (max-width: 300px) {
+        .results-moves {
+          display: none;
+        }
       }
 
       #ninja-wrapper {
@@ -75,7 +393,10 @@
         ></iframe>
       </div>
       <div id="chart-wrapper" class="wrapper">
-        <canvas id="chart" width></canvas>
+        <div id="results" hidden></div>
+        <div id="chart-area">
+          <canvas id="chart" width></canvas>
+        </div>
       </div>
     </div>
 

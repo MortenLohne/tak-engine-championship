@@ -1,8 +1,15 @@
 import { applyPatch } from "https://esm.sh/fast-json-patch@3.1.1";
 import Chart from "https://esm.sh/chart.js@4.5.0/auto";
+import { buildResultsModel } from "./results.js";
+import { createResultsPanel } from "./results-panel.js";
+
+const urlParams = new URLSearchParams(window.location.search);
 
 // const SERVER_URL = "http://192.168.1.2:23456";
-const SERVER_URL = "https://racetrack.mortenlohne.no";
+// `?server=<url>` overrides it, for local testing
+const SERVER_URL = (
+  urlParams.get("server") || "https://racetrack.mortenlohne.no"
+).replace(/\/+$/, "");
 
 let gameState = null;
 let roundNumber = 0;
@@ -93,7 +100,7 @@ function setChartSettings(key, value) {
 
 //#region Chart initialization
 
-const chartContainer = document.getElementById("chart-wrapper");
+const chartContainer = document.getElementById("chart-area");
 
 const verticalLinePlugin = {
   getLinePosition(chart, pointIndex) {
@@ -264,7 +271,8 @@ function resizeChart() {
   chart.resize(chartContainer.offsetWidth, chartContainer.offsetHeight);
 }
 resizeChart();
-window.addEventListener("resize", resizeChart);
+// Also follows the results list opening and closing above the chart
+new ResizeObserver(resizeChart).observe(chartContainer);
 
 function updateChartVerticalLine(plyID = null, plyIsDone = true) {
   let lineAtIndex = null;
@@ -293,9 +301,52 @@ function updateTheme(newTheme) {
     : "";
 
   document.body.style.background = themeColors.bg || "";
-  chartContainer.style.background = themeColors.panel || "";
+  document.getElementById("chart-wrapper").style.background =
+    themeColors.panel || "";
+  const resultsColors = {
+    "--results-bg": themeColors.bg,
+    "--results-panel": themeColors.panel,
+    "--results-text": textColor,
+    "--results-p1": themeColors.player1,
+    "--results-p2": themeColors.player2,
+    "--results-accent": themeColors.primary,
+  };
+  Object.entries(resultsColors).forEach(([name, value]) => {
+    if (value) {
+      document.documentElement.style.setProperty(name, value);
+    } else {
+      document.documentElement.style.removeProperty(name);
+    }
+  });
   Chart.defaults.color = textColor;
   chart.update();
+}
+
+//#region Match results
+
+const resultsPanel = createResultsPanel(document.getElementById("results"), {
+  // Replaced by past-game viewing
+  onSelect: (round) => console.debug("Selected game", round),
+});
+if (urlParams.has("debug")) {
+  window.__resultsPanel = resultsPanel;
+}
+
+function updateResults() {
+  resultsPanel.update(
+    buildResultsModel({
+      engines: gameState.engines,
+      results: gameState.results,
+      totalRounds: gameState.totalRounds,
+      live: {
+        roundNumber: gameState.roundNumber,
+        whitePlayer: formatName(gameState.whitePlayer),
+        blackPlayer: formatName(gameState.blackPlayer),
+        plies: gameState.openingMoves.length + gameState.moves.length,
+      },
+    }),
+    null,
+  );
 }
 
 //#region Clock sync
@@ -727,6 +778,8 @@ function updateGameState() {
 
   // Update the eval chart
   updateChart();
+
+  updateResults();
 }
 
 //#region PTN Ninja sync
