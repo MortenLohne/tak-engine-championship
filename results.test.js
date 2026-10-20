@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildResultsModel,
+  isMatchOver,
   findResult,
   fullMoves,
   isNewMatch,
@@ -282,4 +283,14 @@ test("ptnClock", () => {
     ),
     null,
   );
+});
+
+test("isMatchOver once every scheduled game has a result", () => {
+  const results = [{ roundNumber: 1 }, { roundNumber: 2 }];
+  assert.equal(isMatchOver({ results, totalRounds: 2 }), true);
+  assert.equal(isMatchOver({ results, totalRounds: 3 }), false);
+  // Unknown length (SPRT) or an older server: never over
+  assert.equal(isMatchOver({ results, totalRounds: undefined }), false);
+  assert.equal(isMatchOver({ results: undefined, totalRounds: 2 }), false);
+  assert.equal(isMatchOver({}), false);
 });

@@ -2,8 +2,9 @@ import { applyPatch } from "https://esm.sh/fast-json-patch@3.1.1";
 import Chart from "https://esm.sh/chart.js@4.5.0/auto";
 import {
   buildResultsModel,
-  findResult,
   durationMs,
+  findResult,
+  isMatchOver,
   isNewMatch,
   matchInfo,
   ptnClock,
@@ -394,9 +395,16 @@ const resultsPanel = createResultsPanel(document.getElementById("results"), {
   },
 });
 
+// Once the last game has ended there's no live game to go back to
+let matchOverHandled = false;
+
 function updateResults() {
   if (!gameState) {
     return;
+  }
+  if (isMatchOver(gameState) && !matchOverHandled) {
+    matchOverHandled = true;
+    sendToNinja("DISMISS_NOTIFY", { id: viewingNotificationId });
   }
   resultsPanel.update(
     buildResultsModel({
@@ -762,6 +770,7 @@ async function fetchLoop() {
       // Same round numbers, different games
       clearFinishedGames();
       endNotifiedRounds.clear();
+      matchOverHandled = false;
       previousLiveState = null; // Don't stay on a game from the old match
       roundNumber = 0; // Nor notify that the old match's game ended
     }
@@ -941,6 +950,9 @@ async function showFinishedGame(round) {
 }
 
 function notifyViewing(round) {
+  if (isMatchOver(gameState ?? {})) {
+    return;
+  }
   sendToNinja("NOTIFY", {
     id: viewingNotificationId,
     // Production PTN Ninja ignores `id`; `group` makes it replace the last one

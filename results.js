@@ -52,6 +52,17 @@ export function ptnResult(result) {
   return r && r !== "*" ? r : null;
 }
 
+// Whether every scheduled game has finished. Never true when the number of
+// games isn't known (SPRT, or an older Racetrack without totalRounds).
+export function isMatchOver({ results, totalRounds } = {}) {
+  return (
+    Array.isArray(results) &&
+    Number.isInteger(totalRounds) &&
+    totalRounds > 0 &&
+    results.length >= totalRounds
+  );
+}
+
 export function buildResultsModel({ engines, results, totalRounds, live }) {
   if (!Array.isArray(results)) return null;
   const names = Array.isArray(engines) ? engines.map(formatName) : [];
