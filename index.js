@@ -555,13 +555,24 @@ function sendClocks(isLive) {
   if (!game) {
     return;
   }
-  const time1 = durationMs(game.whiteTimeLeft);
-  const time2 = durationMs(game.blackTimeLeft);
+  let time1 = durationMs(game.whiteTimeLeft);
+  let time2 = durationMs(game.blackTimeLeft);
   if (time1 === null || time2 === null) {
     return;
   }
   const ply = game.openingMoves.length + game.moves.length;
   const timerTurn = ply % 2 === 0 ? 1 : 2;
+  // The clocks are as of the last move. Joining partway through a move, take
+  // off the time the side to move has already used, which Racetrack reports
+  // (engines' own search `time` isn't reliable: some count across the game).
+  const elapsed = isLive ? durationMs(game.currentMoveElapsed) : null;
+  if (elapsed > 0) {
+    if (timerTurn === 1) {
+      time1 = Math.max(0, time1 - elapsed);
+    } else {
+      time2 = Math.max(0, time2 - elapsed);
+    }
+  }
   sendToNinja("SET_GAME_TIME", {
     time1,
     time2,
