@@ -147,7 +147,7 @@ function setChartSettings(key, value) {
 }
 
 // Centipiece axis ticks at round values, placed on the symlog scale
-const CP_TICKS = [100, 300, 1000, 3000, 10000];
+const CP_TICKS = [10, 30, 100, 300, 1000, 3000, 10000];
 
 function formatCentipieces(cp) {
   if (Math.abs(cp) >= MATE_CP) {
@@ -161,16 +161,32 @@ function applyYAxis() {
   const y = chart.config.options.scales.y;
   const tooltip = chart.config.options.plugins.tooltip;
   if (isCentipieceMode()) {
-    const limit = symlog(chartSettings.fixYAxis ? MATE_CP : 300);
+    // Fit keeps a small margin around even, like Win %'s ±10
+    const limit = symlog(chartSettings.fixYAxis ? MATE_CP : 30);
     y.suggestedMin = -limit;
     y.suggestedMax = limit;
     y.afterBuildTicks = (scale) => {
-      const values = [0, MATE_CP, ...CP_TICKS]
-        .flatMap((cp) => (cp ? [cp, -cp] : [cp]))
-        .map(symlog)
-        .filter((v) => v >= scale.min - 1e-9 && v <= scale.max + 1e-9)
-        .sort((a, b) => a - b);
-      scale.ticks = values.map((value) => ({ value }));
+      // Round values outward from 0, skipping any too close to the last one
+      // kept (on wide ranges the small ones would pile up near 0)
+      const minGap = (scale.max - scale.min) / 14;
+      const side = (sign) => {
+        const kept = [];
+        let last = 0;
+        for (const cp of [...CP_TICKS, MATE_CP]) {
+          const value = symlog(sign * cp);
+          if (value < scale.min - 1e-9 || value > scale.max + 1e-9) continue;
+          if (Math.abs(value - last) < minGap) {
+            if (cp !== MATE_CP) continue;
+            kept.pop(); // Mate always gets its tick
+          }
+          kept.push(value);
+          last = value;
+        }
+        return kept;
+      };
+      scale.ticks = [...side(-1).reverse(), 0, ...side(1)].map((value) => ({
+        value,
+      }));
     };
     y.ticks.callback = (value) => formatCentipieces(symlogInverse(value));
     tooltip.callbacks = {
@@ -555,13 +571,24 @@ function sendClocks(isLive) {
   if (!game) {
     return;
   }
-  const time1 = durationMs(game.whiteTimeLeft);
-  const time2 = durationMs(game.blackTimeLeft);
+  let time1 = durationMs(game.whiteTimeLeft);
+  let time2 = durationMs(game.blackTimeLeft);
   if (time1 === null || time2 === null) {
     return;
   }
   const ply = game.openingMoves.length + game.moves.length;
   const timerTurn = ply % 2 === 0 ? 1 : 2;
+  // The clocks are as of the last move. Joining partway through a move, take
+  // off the time the side to move has already used, which Racetrack reports
+  // (engines' own search `time` isn't reliable: some count across the game).
+  const elapsed = isLive ? durationMs(game.currentMoveElapsed) : null;
+  if (elapsed > 0) {
+    if (timerTurn === 1) {
+      time1 = Math.max(0, time1 - elapsed);
+    } else {
+      time2 = Math.max(0, time2 - elapsed);
+    }
+  }
   sendToNinja("SET_GAME_TIME", {
     time1,
     time2,
