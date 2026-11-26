@@ -65,6 +65,10 @@ let previousLiveState = null;
 let savedNotePlies = new Set(); // Track plies with final notes saved
 
 let ninjaGameState = null;
+// Whether PTN Ninja has been set up and the server connected to
+let ninjaStarted = false;
+// Whether PTN Ninja has said READY since this page loaded
+let ninjaWasReady = false;
 let theme = null;
 
 const ninja = document.getElementById("ninja").contentWindow;
@@ -1271,6 +1275,60 @@ function showLiveGame() {
 
 //#region PTN Ninja sync
 
+// Set PTN Ninja up once it has loaded: the first time, connect to the server
+// too; after that, give it back the game it was showing
+function startNinja() {
+  // Defaults first, then saved settings override them so that user-toggled
+  // prefs survive a reload.
+  const mergedNinjaSettings = {
+    ...defaultNinjaSettings,
+    ...(ninjaSettings || {}),
+  };
+  sendToNinja("SET_UI", mergedNinjaSettings);
+  if (
+    !ninjaSettings ||
+    Object.keys(defaultNinjaSettings).some(
+      (key) => ninjaSettings[key] !== mergedNinjaSettings[key],
+    )
+  ) {
+    ninjaSettings = mergedNinjaSettings;
+    localStorage.setItem(
+      ninjaSettingsStorageKey,
+      JSON.stringify(ninjaSettings),
+    );
+  }
+  if (!("themeID" in mergedNinjaSettings)) {
+    // Request theme info
+    sendToNinja("GET_THEME");
+  }
+
+  if (!ninjaStarted) {
+    ninjaStarted = true;
+    // Initiate connection to server
+    fetchLoop();
+    return;
+  }
+
+  // Its state from before it reloaded is of a game it no longer has
+  ninjaGameState = null;
+  if (viewedGame) {
+    loadGameIntoNinja(viewedGame, {
+      live: false,
+      result: ptnResult(
+        findResult(gameState?.results, viewedGame.roundNumber)?.result,
+      ),
+    });
+    notifyViewing(viewedGame.roundNumber);
+  } else {
+    // Load the live game from scratch, now or on the next update
+    roundNumber = 0;
+    moveCount = 0;
+    if (gameState) {
+      updateGameState();
+    }
+  }
+}
+
 function setCurrentAnalysis() {
   const game = shownGame();
   if (!game || !ninjaGameState) {
@@ -1372,34 +1430,20 @@ window.addEventListener(
     const { action, value } = event.data;
 
     switch (action) {
+      case "READY":
+        // Sent each time PTN Ninja loads. The first is this page's own load,
+        // which the first GAME_STATE may already have started; any later one
+        // means PTN Ninja reloaded itself, as it does after a release, and
+        // has lost its settings and game.
+        if (ninjaWasReady || !ninjaStarted) {
+          startNinja();
+        }
+        ninjaWasReady = true;
+        break;
       case "GAME_STATE":
-        if (!ninjaGameState) {
-          // Initiate connection to server
-          fetchLoop();
-
-          // Defaults first, then saved settings override them so that
-          // user-toggled prefs survive a reload.
-          const mergedNinjaSettings = {
-            ...defaultNinjaSettings,
-            ...(ninjaSettings || {}),
-          };
-          sendToNinja("SET_UI", mergedNinjaSettings);
-          if (
-            !ninjaSettings ||
-            Object.keys(defaultNinjaSettings).some(
-              (key) => ninjaSettings[key] !== mergedNinjaSettings[key],
-            )
-          ) {
-            ninjaSettings = mergedNinjaSettings;
-            localStorage.setItem(
-              ninjaSettingsStorageKey,
-              JSON.stringify(ninjaSettings),
-            );
-          }
-          if (!("themeID" in mergedNinjaSettings)) {
-            // Request theme info
-            sendToNinja("GET_THEME");
-          }
+        if (!ninjaStarted) {
+          // A PTN Ninja from before READY
+          startNinja();
         }
         ninjaGameState = value;
         // Show analysis for current position if possible
